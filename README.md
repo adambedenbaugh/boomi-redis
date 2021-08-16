@@ -120,8 +120,12 @@ For additional security, you can also update the Redis firewall to allow only yo
 
 Pooling need to be disable to make the Redis connector working on Test Atom Cloud or Atom Cloud. Please set the Maximum Heap or Configuration file to "nopool"
 
+Version up to 0.78
 ![Alt text](resources/Azure_Redis_Atom_Cloud.png?raw=true "BoomiCache")
 
+Version above 0.79
+
+![img.png](resources/Azure_Redis_Atom_Cloud_v2.png)
 
 ## Use of ehcache configuration file
 

@@ -42,7 +42,7 @@ public class CacheJedisWrapper {
 	
 	boolean noPool;
 
-	public CacheJedisWrapper(String hosts, String password, boolean useSSL, String parameters) {
+	public CacheJedisWrapper(String hosts, String password, boolean useSSL, String parameters, boolean poolEnabled, int poolSize) {
 		if(hosts != null && hosts.length()>0) {
 			//Cluster
 			if(hosts.contains(",")) {
@@ -76,13 +76,14 @@ public class CacheJedisWrapper {
 			//Single Node
 			else {
 				getLogger().info("Trying to create Redis with single host " + hosts);
-				noPool = (parameters != null && parameters.contains("nopool"));
+				//noPool = (parameters != null && parameters.contains("nopool"));
 				String[] pair = hosts.split(":");
 		        
 		        if(!noPool) {
 		        	getLogger().info("Creating Redis with single host and pool");
 		        	JedisPoolConfig poolConfig = new JedisPoolConfig();
 			        poolConfig.setMaxWaitMillis(S_TIMEOUT);
+					poolConfig.setMaxTotal(poolSize);
 					if(password != null && password.length()>0) {
 						jedisPool = new JedisPool(poolConfig, pair[0], Integer.parseInt(pair[1]), S_TIMEOUT, password, useSSL);
 					} else {

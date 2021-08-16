@@ -90,11 +90,13 @@ public class CacheConnection extends BaseConnection {
 					String type = propertiesMap.getProperty("type");
 					cacheInstance.setType(type);
 
-					properties.put(type + "." + "heap", 		propertiesMap.getProperty("heap"));
+					properties.put(type + "." + "heap", 			propertiesMap.getProperty("heap"));
 					properties.put(type + "." + "hosts", 		propertiesMap.getProperty("hosts"));
 					properties.put(type + "." + "useSSL", 		propertiesMap.getBooleanProperty("useSSL").toString());
-					properties.put(type + "." + "user", 		propertiesMap.getProperty("user"));
-					properties.put(type + "." + "password", 	propertiesMap.getProperty("password"));
+					properties.put(type + "." + "user", 			propertiesMap.getProperty("user"));
+					properties.put(type + "." + "password", 		propertiesMap.getProperty("password"));
+					properties.put(type + "." + "poolEnabled", 	propertiesMap.getBooleanProperty("poolEnabled").toString());
+					properties.put(type + "." + "poolSize", 		propertiesMap.getLongProperty("poolSize").toString());
 					cacheInstance.setProperties(properties);
 					cacheInstance.init();
 
