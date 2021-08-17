@@ -1,7 +1,7 @@
 <project name="BoomiCacheConnector" basedir="." default="package">
 	<buildnumber file="build.num"/>
 	
-	<property name="version.num" value="0.79"/>
+	<property name="version.num" value="0.80"/>
 	
 	<property name="class.dir" location="bin" />
 	<property name="inner-jar.name" value="BoomiCacheConnector-${version.num}.jar" />
@@ -48,6 +48,7 @@
 			   source="1.8"
 			   target="1.8"
 			   debug="true"
+			   includeantruntime="true"
 		>
 			<classpath refid="full-classpath"/>
 		</javac>
