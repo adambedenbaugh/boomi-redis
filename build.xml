@@ -11,10 +11,13 @@
 	<property name="connector-xml.name" value="connector-descriptor.xml" />
 	<property name="connector-sdk-home.dir" location="/home/ant/GoogleDrive/lib/boomi/connector-sdk-dist-1.3.2-dist"/>
 	<property name="boomi-home.dir" location="/home/ant/GoogleDrive/lib/boomi"/>
-	
-	<property name="local-deploy.dir" location="C:\Boomi AtomSphere\Atom - desktop-atom\connector\account-ABC123-cache-devex" />
-	<property name="local-connector-zip.name" value="connector-boomi_anthonyrabiaza-3IG5LK-cach2-dev-7100-car.zip" />
-	<property name="local-connector-xml.name" value="info-boomi_anthonyrabiaza-3IG5LK-cach2-dev-7100.xml" />
+
+	<property name="boomi-server" location="yourserver.domain.com" />
+	<property name="boomi-user" location="user" />
+	<property name="boomi-password" location="password" />
+	<property name="local-deploy.dir" location="/opt/Boomi_AtomSphere/Atom/Atom_name/connector/boomiaccount-ABC123-cache-dev" />
+	<property name="local-connector-zip.name" value="connector-boomiaccount-ABC123-cachev-dev-7900-car.zip" />
+	<property name="local-connector-xml.name" value="info-boomi_boomiaccount-ABC123--cachev-dev-7900.xml" />
 
 	<path id="full-classpath">
 		<fileset dir="${connector-sdk-home.dir}">
@@ -77,6 +80,6 @@
 		<copy file="${target.dir}/${connector-xml.name}"  tofile="${local-deploy.dir}/${local-connector-xml.name}"/>
 		<copy file="${target.dir}/${connector-zip.name}"  tofile="${local-deploy.dir}/${local-connector-zip.name}"/>
 		-->
-		<scp file="${target.dir}/${connector-xml.name}" todir="ant@boomi.antsoftware.org:/opt/Boomi_AtomSphere/Atom/Atom_Ubuntu1604/connector/boomi_anthonyrabiaza-3IG5LK-cach2-dev" password="AAABBBCCC" trust="true"/>
+		<scp file="${target.dir}/${connector-xml.name}" todir="${boomi-user}@${boomi-server}:${local-deploy.dir}" password="${boomi-password}" trust="true"/>
 	</target>
 </project>
