@@ -79,7 +79,7 @@ public class CacheJedisWrapper {
 				//noPool = (parameters != null && parameters.contains("nopool"));
 				String[] pair = hosts.split(":");
 		        
-		        if(!poolEnabled) {
+		        if(poolEnabled) {
 		        	getLogger().info("Creating Redis with single host and pool");
 		        	JedisPoolConfig poolConfig = new JedisPoolConfig();
 			        poolConfig.setMaxWaitMillis(S_TIMEOUT);
