@@ -124,7 +124,7 @@ Version up to 0.78
 
 ![Alt text](resources/Azure_Redis_Atom_Cloud.png?raw=true "BoomiCache")
 
-Version above 0.79
+Version equals to 0.79 or above
 
 ![img.png](resources/Azure_Redis_Atom_Cloud_v2.png)
 
