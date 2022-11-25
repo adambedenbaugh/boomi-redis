@@ -1,7 +1,7 @@
 <project name="BoomiCacheConnector" basedir="." default="package">
 	<buildnumber file="build.num"/>
 	
-	<property name="version.num" value="0.85"/>
+	<property name="version.num" value="0.86"/>
 	
 	<property name="class.dir" location="bin" />
 	<property name="inner-jar.name" value="BoomiCacheConnector-${version.num}.jar" />
@@ -9,8 +9,8 @@
 	<property name="embed-resources.dir" location="src/main/resources" />
 	<property name="connector-zip.name" value="BoomiCacheConnector-${version.num}.zip" />
 	<property name="connector-xml.name" value="connector-descriptor.xml" />
-	<property name="connector-sdk-home.dir" location="/home/ant/GoogleDrive/lib/boomi/connector-sdk-dist-1.3.2-dist"/>
-	<property name="boomi-home.dir" location="/home/ant/GoogleDrive/lib/boomi"/>
+	<property name="connector-sdk-home.dir" location="/home/ant/OneDrive/MyDev/lib/boomi/connector-sdk-dist-1.3.2-dist"/>
+	<property name="boomi-home.dir" location="/home/ant/OneDrive/MyDev/lib/boomi"/>
 
 	<property name="boomi-server" location="yourserver.domain.com" />
 	<property name="boomi-user" location="user" />

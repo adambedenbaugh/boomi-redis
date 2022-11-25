@@ -27,6 +27,7 @@ public class CacheJedisWrapper {
 	private static int S_ATTEMPS = 3;
 
 	Jedis jedis;
+	JedisCluster jedisCluster;
 	JedisPool jedisPool;
 	JedisClusterConnectionHandler jedisConnHandler;
 	
@@ -38,7 +39,7 @@ public class CacheJedisWrapper {
 			//Cluster
 			if(hosts.contains(",")) {
 				getLogger().info("Trying to create Redis with hosts list " + hosts);
-				JedisCluster jedisCluster;
+				//JedisCluster jedisCluster;
 				String[] pairs = hosts.split(",");
 				Set<HostAndPort> jedisClusterNodes = new HashSet<HostAndPort>();
 				for(int i=0;i<pairs.length;i++) {
@@ -59,16 +60,18 @@ public class CacheJedisWrapper {
 					jedisCluster = new JedisCluster(jedisClusterNodes);
 				}
 
-				//Creation of Pool
-				Field connectionHandlerField;
-				try {
-					connectionHandlerField = findUnderlying(JedisCluster.class,"connectionHandler");
-					connectionHandlerField.setAccessible(true);
-					jedisConnHandler = (JedisClusterConnectionHandler) connectionHandlerField.get(jedisCluster);
-					getLogger().info("Pool created");
-				} catch (Exception e) {
-					Utils.throwException(e);
-				}
+				//Creation of Handler
+//				Field connectionHandlerField;
+//				try {
+//					connectionHandlerField = findUnderlying(JedisCluster.class,"connectionHandler");
+//					connectionHandlerField.setAccessible(true);
+//					jedisConnHandler = (JedisClusterConnectionHandler) connectionHandlerField.get(jedisCluster);
+//					getLogger().info("Pool created");
+//				} catch (Exception e) {
+//					Utils.throwException(e);
+//				}
+
+				jedisConnHandler = null;
 
 				getLogger().info("Done creating Redis with hosts list");
 
@@ -99,6 +102,7 @@ public class CacheJedisWrapper {
 					}
 		        }
 				getLogger().info("Done creating Redis with single host");
+				jedisCluster = null;
 			}
 		} else {
 			Utils.throwException(new Exception("Cache Host is empty"));
@@ -113,6 +117,9 @@ public class CacheJedisWrapper {
 		}
 	}
 
+	private boolean isCluster() {
+		return jedisCluster!=null;
+	}
 
 	private Jedis getJedis() {
 		if(jedisConnHandler != null) {
@@ -136,99 +143,125 @@ public class CacheJedisWrapper {
 	public Map<String, String> getAll(String hashVal, Long ttl) {
 		getLogger().fine("getAll with args hashVal, ttl : " + hashVal + ", " + ttl);
 		HashMap<String, String> result = new HashMap<String, String>();
-		Jedis jedis = getJedis();
 		Map<String, Response<String>> responses = new HashMap<>();
 		List<String> keys;
 		Pipeline p;
-		try {
-			ScanParams scanParams = new ScanParams().count(100).match(hashVal);
-			String cur = redis.clients.jedis.ScanParams.SCAN_POINTER_START;
-			do {
-				ScanResult<String> scanResult = jedis.scan(cur, scanParams);
-				keys = scanResult.getResult();
-				p = jedis.pipelined();
-				// work with result
-				for (String thisKey : keys) {
-					responses.put(thisKey, p.get(thisKey));
-				}
-				p.sync();
-				for (String thisKey : responses.keySet()) {
-					Response<String> r = (Response<String>) responses.get(thisKey);
-					result.put(thisKey, r.get());
-					getLogger().finest("retrieved key: " + thisKey + " and value: " + r.get());
-				}
-				cur = scanResult.getCursor();
-			} while (!cur.equals(redis.clients.jedis.ScanParams.SCAN_POINTER_START));
-		} finally {
-			releaseJedis(jedis);
-		}
 
+		if(isCluster()) {
+			//TODO
+		} else {
+			Jedis jedis = getJedis();
+			try {
+				ScanParams scanParams = new ScanParams().count(100).match(hashVal);
+				String cur = redis.clients.jedis.ScanParams.SCAN_POINTER_START;
+				do {
+					ScanResult<String> scanResult = jedis.scan(cur, scanParams);
+					keys = scanResult.getResult();
+					p = jedis.pipelined();
+					// work with result
+					for (String thisKey : keys) {
+						responses.put(thisKey, p.get(thisKey));
+					}
+					p.sync();
+					for (String thisKey : responses.keySet()) {
+						Response<String> r = (Response<String>) responses.get(thisKey);
+						result.put(thisKey, r.get());
+						getLogger().finest("retrieved key: " + thisKey + " and value: " + r.get());
+					}
+					cur = scanResult.getCursor();
+				} while (!cur.equals(redis.clients.jedis.ScanParams.SCAN_POINTER_START));
+			} finally {
+				releaseJedis(jedis);
+			}
+		}
 		return result;
 	}
 
 	public String get(String hashVal, Long ttl) {
 		String result;
-		Jedis jedis = getJedis();
-		try {
-			result = jedis.get(hashVal);
+		if(isCluster()) {
+			result = jedisCluster.get(hashVal);
 			if (ttl != -1) {
-				jedis.pexpire(hashVal, ttl);
+				jedisCluster.pexpire(hashVal, ttl);
 			}
-			;
-		} finally {
-			releaseJedis(jedis);
+		} else {
+			Jedis jedis = getJedis();
+			try {
+				result = jedis.get(hashVal);
+				if (ttl != -1) {
+					jedis.pexpire(hashVal, ttl);
+				}
+			} finally {
+				releaseJedis(jedis);
+			}
 		}
 
 		return result;
 	}
 
 	public void set(String hashVal, String value, Long ttl) {
-		Jedis jedis = getJedis();
-		try {
+		if(isCluster()) {
 			if (ttl != -1) {
-				jedis.psetex(hashVal, ttl, value);
+				jedisCluster.psetex(hashVal, ttl, value);
 			} else {
-				jedis.set(hashVal, value);
+				jedisCluster.set(hashVal, value);
 			}
-		} finally {
-			releaseJedis(jedis);
+		} else {
+			Jedis jedis = getJedis();
+			try {
+				if (ttl != -1) {
+					jedis.psetex(hashVal, ttl, value);
+				} else {
+					jedis.set(hashVal, value);
+				}
+			} finally {
+				releaseJedis(jedis);
+			}
 		}
 	}
 
 	public void del(String hashVal) {
-		Jedis jedis = getJedis();
-		try {
-			jedis.del(hashVal);
-		} finally {
-			releaseJedis(jedis);
+		if(isCluster()) {
+			jedisCluster.del(hashVal);
+		} else {
+			Jedis jedis = getJedis();
+			try {
+				jedis.del(hashVal);
+			} finally {
+				releaseJedis(jedis);
+			}
 		}
 	}
 
 	public void delAll(String hashVal) {
 		getLogger().fine("delAll with args hashVal: " + hashVal);
-		Jedis jedis = getJedis();
-		long numDel;
-		try {
-			ScanParams scanParams = new ScanParams().count(100).match(hashVal);
-			String cur = redis.clients.jedis.ScanParams.SCAN_POINTER_START;
-			do {
-				ScanResult<String> scanResult = jedis.scan(cur, scanParams);
-				String[] arrKeys = Arrays.copyOf(scanResult.getResult().toArray(), scanResult.getResult().size(),
-						String[].class);
-				if (arrKeys.length > 0) {
-					getLogger().fine("Attempting to del " + arrKeys.length + " keys");
-					numDel = jedis.del(arrKeys);
-					if (numDel != arrKeys.length) {
-						getLogger().warning("Could not delete " + (arrKeys.length - numDel) + " entries from Redis");
+		if(isCluster()) {
+			//TODO
+		} else {
+			Jedis jedis = getJedis();
+			long numDel;
+			try {
+				ScanParams scanParams = new ScanParams().count(100).match(hashVal);
+				String cur = redis.clients.jedis.ScanParams.SCAN_POINTER_START;
+				do {
+					ScanResult<String> scanResult = jedis.scan(cur, scanParams);
+					String[] arrKeys = Arrays.copyOf(scanResult.getResult().toArray(), scanResult.getResult().size(),
+							String[].class);
+					if (arrKeys.length > 0) {
+						getLogger().fine("Attempting to del " + arrKeys.length + " keys");
+						numDel = jedis.del(arrKeys);
+						if (numDel != arrKeys.length) {
+							getLogger().warning("Could not delete " + (arrKeys.length - numDel) + " entries from Redis");
+						}
+					} else {
+						getLogger().fine("Nothing to delete");
 					}
-				} else {
-					getLogger().fine("Nothing to delete");
-				}
 
-				cur = scanResult.getCursor();
-			} while (!cur.equals(redis.clients.jedis.ScanParams.SCAN_POINTER_START));
-		} finally {
-			releaseJedis(jedis);
+					cur = scanResult.getCursor();
+				} while (!cur.equals(redis.clients.jedis.ScanParams.SCAN_POINTER_START));
+			} finally {
+				releaseJedis(jedis);
+			}
 		}
 	}
 	
