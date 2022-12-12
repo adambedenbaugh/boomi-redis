@@ -1,19 +1,12 @@
 package com.boomi.proserv.caching.impl;
 
-import java.lang.reflect.Field;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.logging.Logger;
-
-import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
-
 import com.boomi.execution.ExecutionUtil;
-
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.*;
+
+import java.lang.reflect.Field;
+import java.util.*;
+import java.util.logging.Logger;
 
 /**
  * Class Wrapper with Jedis Implementation
@@ -55,17 +48,33 @@ public class CacheJedisWrapper {
 						if(!useSSL) {
 							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, poolConfig);
 						} else {
-							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, getClientName(), poolConfig, true);
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, null, poolConfig, true);
 						}
 					} else {
 						if(!useSSL) {
 							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, new GenericObjectPoolConfig());
 						} else {
-							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, getClientName(), new GenericObjectPoolConfig(), true);
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, null, new GenericObjectPoolConfig(), true);
 						}
 					}
 				} else {
-					jedisCluster = new JedisCluster(jedisClusterNodes);
+					//jedisCluster = new JedisCluster(jedisClusterNodes);
+					if(poolEnabled) {
+						GenericObjectPoolConfig poolConfig = new GenericObjectPoolConfig();
+						poolConfig.setMaxWaitMillis(S_TIMEOUT);
+						poolConfig.setMaxTotal(poolSize);
+						if(!useSSL) {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, poolConfig);
+						} else {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, null, null, poolConfig, true);
+						}
+					} else {
+						if(!useSSL) {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, new GenericObjectPoolConfig());
+						} else {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, null, null, new GenericObjectPoolConfig(), true);
+						}
+					}
 				}
 
 				//Creation of Handler
@@ -297,10 +306,6 @@ public class CacheJedisWrapper {
 		} catch (Exception e){
 			return Logger.getLogger(this.getClass().getName());
 		}
-	}
-
-	private String getClientName() {
-		return null;
 	}
 
 	private Field findUnderlying(Class<?> clazz, String fieldName) {

@@ -1,14 +1,5 @@
 package com.boomi.proserv.caching;
 
-import java.io.IOException;
-import java.util.Date;
-import java.util.Map;
-import java.util.Properties;
-import java.util.logging.Logger;
-import java.util.regex.Pattern;
-
-import org.apache.commons.codec.digest.DigestUtils;
-
 import com.boomi.document.scripting.DataContextImpl;
 import com.boomi.execution.ExecutionManager;
 import com.boomi.execution.ExecutionTask;
@@ -16,6 +7,14 @@ import com.boomi.execution.ExecutionUtil;
 import com.boomi.launchutil.StreamUtil;
 import com.boomi.proserv.caching.impl.CacheEHCache;
 import com.boomi.proserv.caching.impl.CacheInterface;
+import org.apache.commons.codec.digest.DigestUtils;
+
+import java.io.IOException;
+import java.util.Date;
+import java.util.Map;
+import java.util.Properties;
+import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * CacheInstance is the intermediate Class which will wrap the Implementation 
@@ -203,7 +202,7 @@ public class CacheInstance {
 	/**
 	 * Get all the keys,valuse from cache
 	 * @param cacheName
-	 * @param key
+	 * @param ttl
 	 * @return
 	 */
 	public Map<String,String> get(String cacheName, Long ttl) {
