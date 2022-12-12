@@ -52,9 +52,17 @@ public class CacheJedisWrapper {
 						GenericObjectPoolConfig poolConfig = new GenericObjectPoolConfig();
 						poolConfig.setMaxWaitMillis(S_TIMEOUT);
 						poolConfig.setMaxTotal(poolSize);
-						jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, poolConfig);
+						if(!useSSL) {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, poolConfig);
+						} else {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, getClientName(), poolConfig, true);
+						}
 					} else {
-						jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, new GenericObjectPoolConfig());
+						if(!useSSL) {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, new GenericObjectPoolConfig());
+						} else {
+							jedisCluster = new JedisCluster(jedisClusterNodes, S_TIMEOUT, S_TIMEOUT, S_ATTEMPS, password, getClientName(), new GenericObjectPoolConfig(), true);
+						}
 					}
 				} else {
 					jedisCluster = new JedisCluster(jedisClusterNodes);
@@ -289,6 +297,10 @@ public class CacheJedisWrapper {
 		} catch (Exception e){
 			return Logger.getLogger(this.getClass().getName());
 		}
+	}
+
+	private String getClientName() {
+		return null;
 	}
 
 	private Field findUnderlying(Class<?> clazz, String fieldName) {
