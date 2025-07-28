@@ -1,0 +1,6 @@
+rootProject.name = 'BoomiCacheConnector'
+settingsDir.eachDirMatch ~/\d\d-.*/, {
+    def name = "${it.name}-solution" 
+    include name 
+    project(":$name").projectDir = it 
+}

@@ -1,0 +1,14 @@
+redis.host=add-host
+redis.ssl=true
+redis.pool.enabled=false
+redis.pool.size=8
+redis.cache.name=
+redis.auto.key=false
+redis.wrap.inprofile=true
+redis.throw.exception=false
+redis.set.ttl=3600
+redis.hashing=false
+
+azure.client.id=add-client-id
+azure.client.secret=add-client-secret
+azure.tenant.id=add-tenant-id

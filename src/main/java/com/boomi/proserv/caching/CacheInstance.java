@@ -1,10 +1,8 @@
 package com.boomi.proserv.caching;
 
-import com.boomi.document.scripting.DataContextImpl;
-import com.boomi.execution.ExecutionManager;
-import com.boomi.execution.ExecutionTask;
-import com.boomi.execution.ExecutionUtil;
-import com.boomi.launchutil.StreamUtil;
+import com.boomi.connector.api.ObjectData;
+import com.boomi.connector.api.Payload;
+import com.boomi.connector.api.PayloadUtil;
 import com.boomi.proserv.caching.impl.CacheEHCache;
 import com.boomi.proserv.caching.impl.CacheInterface;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -136,9 +134,9 @@ public class CacheInstance {
 	 * @param cacheName
 	 * @throws IOException
 	 */
-	public void set(DataContextImpl dataContext, String cacheName, Long ttl) throws IOException {
-		set(dataContext, cacheName, computeKey(dataContext), ttl);
-	}
+	// public void set(DataContextImpl dataContext, String cacheName, Long ttl) throws IOException {
+	// 	set(dataContext, cacheName, computeKey(dataContext), ttl);
+	// }
 
 	/**
 	 * Get the current document to cache using the auto-calculated key.
@@ -147,9 +145,9 @@ public class CacheInstance {
 	 * * @param cacheName
 	 * @return
 	 */
-	public String get(DataContextImpl dataContext, String cacheName, Long ttl) {
-		return get(dataContext, cacheName, computeKey(dataContext), ttl);
-	}
+	// public String get(DataContextImpl dataContext, String cacheName, Long ttl) {
+	// 	return get(dataContext, cacheName, computeKey(dataContext), ttl);
+	// }
 
 	/*End*/
 
@@ -162,25 +160,30 @@ public class CacheInstance {
 	 * @param key
 	 * @throws IOException
 	 */
-	public void set(DataContextImpl dataContext, String cacheName, String key, Long ttl) throws IOException {
-		StringBuffer content = new StringBuffer();
-		for(int i=0;i<dataContext.getDataCount();i++) {
-			content.append(StreamUtil.toString(dataContext.getStream(i), "UTF-8"));
-		}
-		set(cacheName, key, content.toString(), ttl);
-	}
+	// public void set(DataContextImpl dataContext, String cacheName, String key, Long ttl) throws IOException {
+	// 	StringBuffer content = new StringBuffer();
+	// 	for(int i=0;i<dataContext.getDataCount();i++) {
+	// 		//content.append(StreamUtil.toString(dataContext.getStream(i), "UTF-8"));
+	// 		try (InputStream is = dataContext.getStream(i)) {
+    // 			java.util.Scanner s = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A");
+    // 			content.append(s.hasNext() ? s.next() : "");
+	// 		} catch (IOException e) {
+	// 			getLogger().severe("Error reading stream: " + e.getMessage());
+	// 		}
+	// 	}
+	// 	set(cacheName, key, content.toString(), ttl);
+	// }
 
 	/**
-	 * Get the current document to cache using the provided key.
-	 * Also a Dynamic Process property call cache_hit will be set to true (if value is found) of false (otherwise)
-	 * @param dataContext
-	 * @param cacheName
-	 * @param key
-	 * @return
-	 */
-	public String get(DataContextImpl dataContext, String cacheName, String key, Long ttl) {
-		return get(cacheName, key, ttl);
-	}
+	//  * Get the current document from cache using the provided key.
+	//  * @param input the ObjectData containing properties for context
+	//  * @param cacheName name of the cache to retrieve from
+	//  * @param key the key to retrieve
+	//  * @return the cached value
+	//  */
+	// public String get(ObjectData input, String cacheName, String key, Long ttl) {
+	// 	return get(cacheName, key, ttl);
+	// }
 
 	/*End*/
 
@@ -209,9 +212,9 @@ public class CacheInstance {
 		getLogger().info("Getting all keys,values from " + cacheName);
 		Map<String,String> keysValues = cache.get(cacheName, ttl);
 		getLogger().info("Value returned");
-		if(!standalone) {
-			CacheInstance.addCacheHitToContext(keysValues!=null);
-		}
+		// if(!standalone) {
+		// 	CacheInstance.addCacheHitToContext(keysValues!=null);
+		// }
 		lastUsedDate = new Date();
 		return keysValues;
 	}
@@ -226,9 +229,9 @@ public class CacheInstance {
 		getLogger().info("Getting value from " + cacheName + " with key " + key);
 		String value = cache.get(cacheName, key, ttl);
 		getLogger().info("Value returned");
-		if(!standalone) {
-			CacheInstance.addCacheHitToContext(value!=null);
-		}
+		// if(!standalone) {
+		// 	CacheInstance.addCacheHitToContext(value!=null);
+		// }
 		lastUsedDate = new Date();
 		return value;
 	}
@@ -255,11 +258,7 @@ public class CacheInstance {
 	}
 
 	private Logger getLogger() {
-		try {
-			return ExecutionUtil.getBaseLogger();
-		} catch (Exception e){
-			return Logger.getLogger(CacheInstance.class.getName());
-		}
+		return Logger.getLogger(CacheInstance.class.getName());
 	}
 
 	/*End*/
@@ -273,13 +272,13 @@ public class CacheInstance {
 		return lastUsedDate;
 	}
 
-	private String computeKey(DataContextImpl dataContext) {
-		if(!standalone) {
-			return computeKey(CacheInstance.getContextProperties());
-		} else {
-			return "DEFAULT";
-		}
-	}
+	// private String computeKey(DataContextImpl dataContext) {
+	// 	// if(!standalone) {
+	// 	// 	return computeKey(CacheInstance.getContextProperties());
+	// 	// } else {
+	// 		return "DEFAULT";
+	// 	// }
+	// }
 
 	/**
 	 * Method used to compute the key (when the key is not provided). It using the Dynamic Process Properties
@@ -322,21 +321,21 @@ public class CacheInstance {
 		getLogger().info("Closing CacheInstance with type " + type + " and properties " + properties);
 	}
 	
-	static public void addCacheHitToContext(boolean hit) {
-		ExecutionTask task;
-		task = ExecutionManager.getCurrent();
-		if (task !=null) {
-			task.setProperty(CACHE_HIT, String.valueOf(hit));
-		}
-	}
+	// static public void addCacheHitToContext(boolean hit) {
+	// 	ExecutionTask task;
+	// 	task = ExecutionManager.getCurrent();
+	// 	if (task !=null) {
+	// 		task.setProperty(CACHE_HIT, String.valueOf(hit));
+	// 	}
+	// }
 	
-	static public Properties getContextProperties() {
-		ExecutionTask task;
-		task = ExecutionManager.getCurrent();
-		if (task !=null) {
-		  return task.getProperties();
-		}
-		return new Properties();
-	}
+	// static public Properties getContextProperties() {
+	// 	ExecutionTask task;
+	// 	task = ExecutionManager.getCurrent();
+	// 	if (task !=null) {
+	// 	  return task.getProperties();
+	// 	}
+	// 	return new Properties();
+	// }
 
 }

@@ -10,7 +10,7 @@ import com.boomi.connector.api.OperationResponse;
 import com.boomi.connector.api.OperationStatus;
 import com.boomi.connector.api.ResponseUtil;
 import com.boomi.connector.util.BaseGetOperation;
-import com.boomi.proserv.caching.CacheInstance;
+
 
 /**
  * 
@@ -27,19 +27,19 @@ public class CacheGetOperation extends BaseGetOperation {
 	protected void executeGet(GetRequest request, OperationResponse response) {
 
 		Logger logger = response.getLogger();
-		logger.fine("ARA: executeGet received");
+		logger.fine("executeGet");
 
 		String cacheName = getContext().getOperationProperties().getProperty("cache_name");
-		logger.fine("ARA: CacheName " + cacheName);
-
+		logger.fine("CacheName: " + cacheName);
+		
 		boolean autoKey = getContext().getOperationProperties().getBooleanProperty("auto_key");
-		logger.fine("ARA: AutoKey " + autoKey);
+		logger.fine("AutoKey: " + autoKey);
 
 		boolean throwException = getContext().getOperationProperties().getBooleanProperty("throw_exception");
-		logger.fine("ARA: ThrowException " + throwException);
+		logger.fine("ThrowException: " + throwException);
 
 		boolean wrapInProfile = getContext().getOperationProperties().getBooleanProperty("wrap_inprofile");
-		logger.fine("ARA: WrapInProfile " + wrapInProfile);
+		logger.fine("WrapInProfile: " + wrapInProfile);
 
 		long ttl;
 		try {
@@ -47,17 +47,14 @@ public class CacheGetOperation extends BaseGetOperation {
 		} catch (Exception e) {
 			ttl = -1;
 		}
-		logger.fine("ARA: TTL " + ttl);
+		logger.fine("TTL: " + ttl);
 		
 		ObjectIdData input = request.getObjectId();
 
 		try {
 			String objectId = input.getObjectId();
 
-			if(autoKey) {
-				objectId = getConnection().computeKey(CacheInstance.getContextProperties());
-			}
-			logger.info("ARA: ID " + objectId);
+			logger.fine("ID: " + objectId);
 
 			if(!"*".equals(objectId)) {//Normal Get
 				String cachedValue = getConnection().get(cacheName, objectId, ttl);
@@ -66,10 +63,10 @@ public class CacheGetOperation extends BaseGetOperation {
 					ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
 				}
 
-				logger.fine("ARA: CacheValue received:" + cachedValue);
+				logger.fine("CacheValue received:" + cachedValue);
 
 				if(cachedValue != null) {
-					logger.fine("ARA: Cache Hit");
+					logger.fine("Cache Hit");
 					if(wrapInProfile) {
 						response.addResult(input, OperationStatus.SUCCESS, "200", "OK", ResponseUtil.toPayload("<Get><ID>"+objectId+"</ID><Value>"+cachedValue+"</Value></Get>"));
 					} else {
@@ -77,7 +74,7 @@ public class CacheGetOperation extends BaseGetOperation {
 					}
 				} else {
 					//Return null
-					logger.fine("ARA: Cache Empty");
+					logger.fine("Cache Empty");
 					response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
 				}
 
@@ -88,10 +85,10 @@ public class CacheGetOperation extends BaseGetOperation {
 					ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
 				}
 
-				logger.fine("ARA: CacheValue received:" + cachedValue);
+				logger.fine("CacheValue received: " + cachedValue);
 
 				if(cachedValue != null) {
-					logger.fine("ARA: Cache Hit");
+					logger.fine("Cache Hit");
 					for (Iterator<String> iterator = cachedValue.keySet().iterator(); iterator.hasNext();) {
 						String key = iterator.next();
 						String value = cachedValue.get(key);
@@ -106,7 +103,7 @@ public class CacheGetOperation extends BaseGetOperation {
 					response.finishPartialResult(input);
 				} else {
 					//Return null
-					logger.fine("ARA: Cache Empty");
+					logger.fine("Cache Empty");
 					response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
 				}
 			}

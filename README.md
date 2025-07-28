@@ -1,3 +1,5 @@
+Fork of [BoomiCacheConnector](https://bitbucket.org/officialboomi/boomicacheconnector/src/master/)
+
 # Boomi Cache Connector v2 (with TTL)
 
 I wanted to share a solution I recently developed to have high-throughput in the Dell Boomi AtomSphere Platform: use of Cache Pattern with In-Memory Data Grid or In-Memory Database (cf [IMDG/IMDB](https://en.wikipedia.org/wiki/List_of_in-memory_databases). 

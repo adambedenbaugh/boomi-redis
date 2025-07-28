@@ -18,6 +18,7 @@ public class CacheRedis implements CacheInterface {
 	private CacheJedisWrapper cache = null;
 	
 	private String hosts;
+	private String user;
 	private String password;
 	private boolean useSSL;
 	private String parameters;
@@ -80,10 +81,11 @@ public class CacheRedis implements CacheInterface {
 	public void init() {
 		hosts 		= 					getProperties().getProperty(CacheRedis.class.getName() + ".hosts");
 		useSSL 		= Boolean.valueOf(	getProperties().getProperty(CacheRedis.class.getName() + ".useSSL"));
+		user 		= 					getProperties().getProperty(CacheRedis.class.getName() + ".user");
 		password 	= 					getProperties().getProperty(CacheRedis.class.getName() + ".password");
 		parameters 	= 					getProperties().getProperty(CacheRedis.class.getName() + ".heap");
 		poolEnabled = Boolean.valueOf(	getProperties().getProperty(CacheRedis.class.getName() + ".poolEnabled"));
 		poolSize 	= Integer.valueOf(	getProperties().getProperty(CacheRedis.class.getName() + ".poolSize"));
-		cache 		= new CacheJedisWrapper(hosts, password, useSSL, parameters, poolEnabled, poolSize);
+		cache 		= new CacheJedisWrapper(hosts, user, password, useSSL, parameters, poolEnabled, poolSize);
 	}
 }

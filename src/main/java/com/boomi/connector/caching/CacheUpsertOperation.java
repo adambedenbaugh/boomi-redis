@@ -11,7 +11,6 @@ import com.boomi.connector.api.OperationStatus;
 import com.boomi.connector.api.ResponseUtil;
 import com.boomi.connector.api.UpdateRequest;
 import com.boomi.connector.util.BaseUpdateOperation;
-import com.boomi.proserv.caching.CacheInstance;
 import com.boomi.proserv.caching.CacheUtils;
 
 /**
@@ -28,14 +27,14 @@ public class CacheUpsertOperation extends BaseUpdateOperation {
 	@Override
 	protected void executeUpdate(UpdateRequest request, OperationResponse response) {
 		Logger logger = response.getLogger();
-		logger.fine("ARA: executeUpdate received");
+		logger.fine("executeUpdate");
 		
 		String cacheName = getContext().getOperationProperties().getProperty("cache_name");
-		logger.fine("ARA: CacheName " + cacheName);
+		logger.fine("CacheName: " + cacheName);
 		
 		boolean autoKey = getContext().getOperationProperties().getBooleanProperty("auto_key");
-		logger.fine("ARA: AutoKey " + autoKey);
-		
+		logger.fine("AutoKey: " + autoKey);
+
 		long ttl;
 		try {
 			ttl = getContext().getOperationProperties().getLongProperty("set_ttl");
@@ -45,15 +44,15 @@ public class CacheUpsertOperation extends BaseUpdateOperation {
 		
 		int i=0;
 		for (ObjectData input : request) {
-			logger.fine("ARA: Processing input " + i++);
+			logger.fine("Processing input " + i++);
 			try {
 				String inputStr = CacheUtils.inputStreamToString(input.getData());
 				Document doc = CacheUtils.parse(CacheUtils.stringToInputStream(inputStr));
 				//logger.info("ARA: Content " + CacheUtils.toString(doc));
 				String objectId = CacheUtils.getFirstNodeTextContent(doc, "//Upsert/ID");
-				if(autoKey) {
-					objectId = getConnection().computeKey(CacheInstance.getContextProperties());
-				}
+				// if(autoKey) {
+				// 	objectId = getConnection().computeKey(CacheInstance.getContextProperties());
+				// }
 				String value = CacheUtils.getFirstNodeTextContent(doc, "//Upsert/Value");
 				getConnection().upsert(cacheName, objectId, value, ttl);
 

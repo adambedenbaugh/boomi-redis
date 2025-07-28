@@ -13,6 +13,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
+import com.boomi.connector.caching.authentication.MicrosoftEntraClientSecretCredential;
 import com.boomi.connector.util.BaseConnection;
 import com.boomi.proserv.caching.CacheInstance;
 
@@ -81,25 +82,45 @@ public class CacheConnection extends BaseConnection {
 			if(cacheInstance == null || !cacheInstance.isValid()){
 				synchronized(this){
 					Properties properties = new Properties();
-
 					cacheInstance = new CacheInstance();
 					cacheInstance.setStandalone(false);
 					cacheInstance.setDynamicProcessPropertiesFilter(propertiesMap.getProperty("properties_filter"));
-					cacheInstance.setHashing(propertiesMap.getBooleanProperty("hashing"));
-
+					//cacheInstance.setHashing(propertiesMap.getBooleanProperty("hashing"));
 					String type = propertiesMap.getProperty("type");
 					cacheInstance.setType(type);
 
+					String authenticationType = propertiesMap.getProperty("authenticationType");
+					switch (authenticationType) {
+						case "Basic":
+							properties.put(type + "." + "user", propertiesMap.getProperty("user"));
+							properties.put(type + "." + "password", propertiesMap.getProperty("password"));
+							break;
+						case "MicrosoftEntraClientSecretCredential":
+							String clientId = propertiesMap.getProperty("clientId");
+							String clientSecret = propertiesMap.getProperty("clientSecret");
+							String tenantId = propertiesMap.getProperty("tenantId");
+
+							MicrosoftEntraClientSecretCredential credential = new MicrosoftEntraClientSecretCredential(tenantId, clientId, clientSecret);
+
+							properties.put(type + "." + "user", credential.getUsername());
+							properties.put(type + "." + "password", credential.getToken());
+							break;
+						default:
+							// No authentication
+					}
+
 					properties.put(type + "." + "heap", 			propertiesMap.getProperty("heap"));
-					properties.put(type + "." + "hosts", 		propertiesMap.getProperty("hosts"));
-					properties.put(type + "." + "useSSL", 		propertiesMap.getBooleanProperty("useSSL").toString());
-					properties.put(type + "." + "user", 			propertiesMap.getProperty("user"));
-					properties.put(type + "." + "password", 		propertiesMap.getProperty("password"));
-					properties.put(type + "." + "poolEnabled", 	propertiesMap.getBooleanProperty("poolEnabled").toString());
-					properties.put(type + "." + "poolSize", 		propertiesMap.getLongProperty("poolSize").toString());
+					properties.put(type + "." + "hosts", 			propertiesMap.getProperty("hosts"));
+					properties.put(type + "." + "useSSL", 			propertiesMap.getBooleanProperty("useSSL").toString());
+					properties.put(type + "." + "poolEnabled", 		propertiesMap.getBooleanProperty("poolEnabled").toString());
+					if(propertiesMap.getLongProperty("poolSize") != null) {
+						properties.put(type + "." + "poolSize", propertiesMap.getLongProperty("poolSize").toString());
+					} else {
+						properties.put(type + "." + "poolSize", "1");
+					}
+					//properties.put(type + "." + "poolSize", 		propertiesMap.getLongProperty("poolSize").toString());
 					cacheInstance.setProperties(properties);
 					cacheInstance.init();
-
 					s_cacheInstance.put(propertiesHash, cacheInstance);
 				}
 			}

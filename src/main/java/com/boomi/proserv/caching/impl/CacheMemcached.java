@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.logging.Logger;
 
-import com.boomi.execution.ExecutionUtil;
+// import com.boomi.execution.ExecutionUtil;
 
 import net.spy.memcached.MemcachedClient;
 
@@ -114,11 +114,11 @@ public class CacheMemcached implements CacheInterface {
 	}
 	
 	private Logger getLogger() {
-		try {
-			return ExecutionUtil.getBaseLogger();
-		} catch (Exception e){
+		// try {
+		// 	return ExecutionUtil.getBaseLogger();
+		// } catch (Exception e){
 			return Logger.getLogger(this.getClass().getName());
-		}
+		// }
 	}
 
 

@@ -25,3 +25,24 @@ bin/get.xsd
 bin/metadata.xml
 bin/upsert.xsd
 /bin/
+
+# Ignore Gradle build output
+/build/
+.gradle/
+
+# Ignore IDE files
+.idea/
+*.iml
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore Ant build output
+/bin/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore Files with Passwords
+src/test/**/*.properties

@@ -1,0 +1,12 @@
+redis.host=add-host
+redis.password=add-password
+redis.user=default
+redis.ssl=false
+redis.pool.enabled=false
+redis.pool.size=8
+redis.cache.name=
+redis.auto.key=false
+redis.wrap.inprofile=true
+redis.throw.exception=true
+redis.set.ttl=3600
+redis.hashing=false

@@ -16,7 +16,7 @@ import org.ehcache.config.builders.CacheManagerBuilder;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
 import org.ehcache.xml.XmlConfiguration;
 
-import com.boomi.execution.ExecutionUtil;
+
 
 /**
  * Cache implementing EHCache, this class is the one implementation of CacheInterface <br/>
@@ -145,11 +145,7 @@ public class CacheEHCache implements CacheInterface {
 	}
 	
 	private Logger getLogger() {
-		try {
-			return ExecutionUtil.getBaseLogger();
-		} catch (Exception e){
 			return Logger.getLogger(this.getClass().getName());
-		}
 	}
 
 
