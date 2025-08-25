@@ -1,12 +1,18 @@
 package com.boomi.connector.caching.authentication;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import com.azure.core.credential.TokenRequestContext;
-import com.azure.identity.ClientSecretCredential;
-import com.azure.identity.ClientSecretCredentialBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+
 
 public class MicrosoftEntraClientSecretCredential {
 
@@ -21,17 +27,46 @@ public class MicrosoftEntraClientSecretCredential {
      * @param clientSecret The client secret of the application.
      */
     public MicrosoftEntraClientSecretCredential(String tenantId, String clientId, String clientSecret) {
-        ClientSecretCredential clientSecretCredential = new ClientSecretCredentialBuilder()
-            .clientId(clientId)
-            .clientSecret(clientSecret)
-            .tenantId(tenantId)
-            .build();
 
-        token = clientSecretCredential
-                    .getToken(new TokenRequestContext()
-                        .addScopes("https://redis.azure.com/.default")).block().getToken();
+        String responseBody = "";
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            String url = "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/token";
+            HttpPost post = new HttpPost(url);
+            post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+            post.setEntity(new StringEntity(
+                "grant_type=client_credentials&client_id=" + clientId + 
+                "&client_secret=" + clientSecret + 
+                "&scope=https://redis.azure.com/.default", 
+                StandardCharsets.UTF_8));
+
+            try (CloseableHttpResponse response = httpClient.execute(post)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                System.out.println("Response Status Code: " + statusCode);
+                
+                if (statusCode != 200) {
+                    throw new IOException("Failed to obtain token, status code: " + statusCode);
+                }
+                
+                if (response.getEntity() != null) {
+                    responseBody = EntityUtils.toString(response.getEntity());
+                } else {
+                    throw new IOException("Microsoft Entra response is null");
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+
+        token = jsonResponse.get("access_token").getAsString();
+        if (token == null || token.isEmpty()) {
+            throw new IllegalArgumentException("Failed to obtain access token.");
+        }
         username = extractUsernameFromToken(token);
-
+        if (username == null || username.isEmpty()) {
+            throw new IllegalArgumentException("Failed to extract username from token.");
+        }
     }
 
 

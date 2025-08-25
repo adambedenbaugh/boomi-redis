@@ -1,9 +1,5 @@
 package com.boomi.proserv.caching;
 
-import com.boomi.connector.api.ObjectData;
-import com.boomi.connector.api.Payload;
-import com.boomi.connector.api.PayloadUtil;
-import com.boomi.proserv.caching.impl.CacheEHCache;
 import com.boomi.proserv.caching.impl.CacheInterface;
 import org.apache.commons.codec.digest.DigestUtils;
 
@@ -21,11 +17,11 @@ import java.util.regex.Pattern;
  */
 public class CacheInstance {
 	
-	private final static String PROPERTIES_SEPARATOR 	= "@@";
-	private final static String CACHE_HIT 				= "cache_hit";
+	// private final static String PROPERTIES_SEPARATOR 	= "@@";
+	// private final static String CACHE_HIT 				= "cache_hit";
 	
 	private CacheInterface cache 					= null; 
-	private String dynamicProcessPropertiesFilter 	= "(query_.*)|(param_.*)";
+	// private String dynamicProcessPropertiesFilter 	= "(query_.*)|(param_.*)";
 	private String type								= null;
 	private boolean hashing 						= true;
 	private boolean standalone 						= false;
@@ -37,13 +33,13 @@ public class CacheInstance {
 		return this.getClass().getPackage().getImplementationVersion();
 	}
 	
-	public String getDynamicProcessPropertiesFilter() {
-		return dynamicProcessPropertiesFilter;
-	}
+	// public String getDynamicProcessPropertiesFilter() {
+	// 	return dynamicProcessPropertiesFilter;
+	// }
 
-	public void setDynamicProcessPropertiesFilter(String dynamicProcessPropertiesFilter) {
-		this.dynamicProcessPropertiesFilter = dynamicProcessPropertiesFilter;
-	}
+	// public void setDynamicProcessPropertiesFilter(String dynamicProcessPropertiesFilter) {
+	// 	this.dynamicProcessPropertiesFilter = dynamicProcessPropertiesFilter;
+	// }
 
 	public String getType() {
 		return type;
@@ -87,9 +83,6 @@ public class CacheInstance {
 	 * This method can be call to reinit the Cache after a change in boomicache.properties to avoid a restart
 	 */
 	public void init() {
-		if(type == null) {
-			type = CacheEHCache.class.getName();
-		}
 		getLogger().info("Cache connector implementation version: " + getVersion());
 		getLogger().info("Initialization of Cache Instance with type " + type + " and properties " + properties);
 		if(type != null && type.length()>0) {
@@ -101,12 +94,6 @@ public class CacheInstance {
 				getLogger().warning(e.getMessage());
 				e.printStackTrace();
 			}
-		}
-
-		if(cache == null) {
-			getLogger().info("Use default cache type (EHCache)");
-			type = CacheEHCache.class.getName();
-			cache = new CacheEHCache();
 		}
 		
 		cache.setProperties(properties);
@@ -127,67 +114,6 @@ public class CacheInstance {
 	public CacheInterface getCache() {
 		return cache;
 	}
-
-	/**
-	 * Store the current document to cache using the auto-calculated key.
-	 * @param dataContext
-	 * @param cacheName
-	 * @throws IOException
-	 */
-	// public void set(DataContextImpl dataContext, String cacheName, Long ttl) throws IOException {
-	// 	set(dataContext, cacheName, computeKey(dataContext), ttl);
-	// }
-
-	/**
-	 * Get the current document to cache using the auto-calculated key.
-	 * Also a Dynamic Process property call cache_hit will be set to true (if value is found) of false (otherwise)
-	 * @param dataContext
-	 * * @param cacheName
-	 * @return
-	 */
-	// public String get(DataContextImpl dataContext, String cacheName, Long ttl) {
-	// 	return get(dataContext, cacheName, computeKey(dataContext), ttl);
-	// }
-
-	/*End*/
-
-	/*Key is provided, value to store will be the full Document*/
-
-	/**
-	 * Store the current document to cache using the provided key
-	 * @param dataContext
-	 * * @param cacheName
-	 * @param key
-	 * @throws IOException
-	 */
-	// public void set(DataContextImpl dataContext, String cacheName, String key, Long ttl) throws IOException {
-	// 	StringBuffer content = new StringBuffer();
-	// 	for(int i=0;i<dataContext.getDataCount();i++) {
-	// 		//content.append(StreamUtil.toString(dataContext.getStream(i), "UTF-8"));
-	// 		try (InputStream is = dataContext.getStream(i)) {
-    // 			java.util.Scanner s = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A");
-    // 			content.append(s.hasNext() ? s.next() : "");
-	// 		} catch (IOException e) {
-	// 			getLogger().severe("Error reading stream: " + e.getMessage());
-	// 		}
-	// 	}
-	// 	set(cacheName, key, content.toString(), ttl);
-	// }
-
-	/**
-	//  * Get the current document from cache using the provided key.
-	//  * @param input the ObjectData containing properties for context
-	//  * @param cacheName name of the cache to retrieve from
-	//  * @param key the key to retrieve
-	//  * @return the cached value
-	//  */
-	// public String get(ObjectData input, String cacheName, String key, Long ttl) {
-	// 	return get(cacheName, key, ttl);
-	// }
-
-	/*End*/
-
-	/*Provide the key and value*/
 
 	/**
 	 * Store the current value to cache using the provided key.
@@ -212,9 +138,6 @@ public class CacheInstance {
 		getLogger().info("Getting all keys,values from " + cacheName);
 		Map<String,String> keysValues = cache.get(cacheName, ttl);
 		getLogger().info("Value returned");
-		// if(!standalone) {
-		// 	CacheInstance.addCacheHitToContext(keysValues!=null);
-		// }
 		lastUsedDate = new Date();
 		return keysValues;
 	}
@@ -229,9 +152,7 @@ public class CacheInstance {
 		getLogger().info("Getting value from " + cacheName + " with key " + key);
 		String value = cache.get(cacheName, key, ttl);
 		getLogger().info("Value returned");
-		// if(!standalone) {
-		// 	CacheInstance.addCacheHitToContext(value!=null);
-		// }
+
 		lastUsedDate = new Date();
 		return value;
 	}
@@ -261,81 +182,56 @@ public class CacheInstance {
 		return Logger.getLogger(CacheInstance.class.getName());
 	}
 
-	/*End*/
 
 
-	public Date getCreationDate() {
-		return creationDate;
-	}
+	// public Date getCreationDate() {
+	// 	return creationDate;
+	// }
 
 	public Date getLastUsedDate() {
 		return lastUsedDate;
 	}
 
-	// private String computeKey(DataContextImpl dataContext) {
-	// 	// if(!standalone) {
-	// 	// 	return computeKey(CacheInstance.getContextProperties());
-	// 	// } else {
-	// 		return "DEFAULT";
-	// 	// }
+
+	// /**
+	//  * Method used to compute the key (when the key is not provided). It using the Dynamic Process Properties
+	//  * You can setup the filter by providing the property com.boomi.proserv.caching.Cache.dynamic_process_properties_filter; Default value will be "(query_.*)|(param_.*)" to use HTTP Query elements and HTTP Parameters
+	//  * @param properties
+	//  * @return
+	//  */
+	// public String computeKey(Properties properties) {
+
+	// 	StringBuffer buffer = new StringBuffer();
+		
+	// 	for (String key : properties.keySet().toArray(new String[0])) {
+	// 		boolean add = true;
+
+	// 		if(key.equals(CACHE_HIT)) {
+	// 			continue;
+	// 		}
+
+	// 		add = Pattern.matches(dynamicProcessPropertiesFilter, key);
+
+	// 		if(add) {
+	// 			buffer.append(key + "=" + properties.getProperty(key) + PROPERTIES_SEPARATOR);
+	// 		}
+	// 	}
+		
+	// 	if(buffer.length()==0) {
+	// 		buffer.append("NO_KEY");
+	// 	}
+
+	// 	getLogger().info("Key before hashing " + buffer.toString());
+
+	// 	if(hashing) {
+	// 		return DigestUtils.sha256Hex(buffer.toString());
+	// 	} else {
+	// 		return buffer.toString();
+	// 	}
 	// }
-
-	/**
-	 * Method used to compute the key (when the key is not provided). It using the Dynamic Process Properties
-	 * You can setup the filter by providing the property com.boomi.proserv.caching.Cache.dynamic_process_properties_filter; Default value will be "(query_.*)|(param_.*)" to use HTTP Query elements and HTTP Parameters
-	 * @param properties
-	 * @return
-	 */
-	public String computeKey(Properties properties) {
-
-		StringBuffer buffer = new StringBuffer();
-		
-		for (String key : properties.keySet().toArray(new String[0])) {
-			boolean add = true;
-
-			if(key.equals(CACHE_HIT)) {
-				continue;
-			}
-
-			add = Pattern.matches(dynamicProcessPropertiesFilter, key);
-
-			if(add) {
-				buffer.append(key + "=" + properties.getProperty(key) + PROPERTIES_SEPARATOR);
-			}
-		}
-		
-		if(buffer.length()==0) {
-			buffer.append("NO_KEY");
-		}
-
-		getLogger().info("Key before hashing " + buffer.toString());
-
-		if(hashing) {
-			return DigestUtils.sha256Hex(buffer.toString());
-		} else {
-			return buffer.toString();
-		}
-	}
 	
 	public void close() {
 		getLogger().info("Closing CacheInstance with type " + type + " and properties " + properties);
 	}
-	
-	// static public void addCacheHitToContext(boolean hit) {
-	// 	ExecutionTask task;
-	// 	task = ExecutionManager.getCurrent();
-	// 	if (task !=null) {
-	// 		task.setProperty(CACHE_HIT, String.valueOf(hit));
-	// 	}
-	// }
-	
-	// static public Properties getContextProperties() {
-	// 	ExecutionTask task;
-	// 	task = ExecutionManager.getCurrent();
-	// 	if (task !=null) {
-	// 	  return task.getProperties();
-	// 	}
-	// 	return new Properties();
-	// }
 
 }

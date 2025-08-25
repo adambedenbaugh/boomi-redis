@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="windows-1252"?>
 <GenericConnectorDescriptor
 	onPremiseBrowseOnly="true" browsingType="onpremise" requireConnectionForBrowse="false">
-	<description>Boomi Cache Connector</description>
+	<description>Redis Connector</description>
 	
-    <field id="type" label="Cache Type" type="string">
+    <!-- <field id="type" label="Cache Type" type="string">
         <helpText>If not using default Cache, please provide an implementation Class</helpText>
         <defaultValue>Azure Cache for Redis</defaultValue>
         <allowedValue label="Azure Cache for Redis">        	
@@ -18,17 +18,7 @@
        	<allowedValue label="Memcached">        	
         	<value>com.boomi.proserv.caching.impl.CacheMemcached</value>
        	</allowedValue>
-    </field>
-
-    <field id="heap" label="Maximum Heap or Configuration file (EHCache)" type="string">
-        <helpText>If using EHCache, you can provide the maximum object of Object (key-value pair) that can be stored in this Cache or the full path of a configuration file (EHCache v3)</helpText>
-        <defaultValue>1024</defaultValue>
-        <visibilityCondition>
-            <valueCondition fieldId="type">
-                <value>com.boomi.proserv.caching.impl.CacheEHCache</value>
-            </valueCondition>
-        </visibilityCondition>
-    </field>
+    </field> -->
     
     <field id="hosts" label="Hosts" type="string">
         <helpText>For Redis Standalone, please provide the host and port separate with a semi-colon. For Redis Clustered, please provide the list of the hosts with a comma to separate them. For instance: host1:port1,host2:port2</helpText>
@@ -36,7 +26,7 @@
     </field>
     
      <field id="useSSL" label="Use SSL" type="boolean">
-        <helpText>For Redis (Azure), you can provide enable this option to use SSL. Please also make sure you are using the correct SSL Port (should be 6380)</helpText>
+        <helpText>Enable this option to use SSL with Azure Cachse for Redis. Default SSL Port is 6380.</helpText>
         <defaultValue>false</defaultValue>
     </field>
     

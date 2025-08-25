@@ -9,18 +9,30 @@ import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.ehcache.Cache;
+
 import com.boomi.connector.api.OperationType;
+import com.boomi.connector.caching.authentication.MicrosoftEntraClientSecretCredential;
 import com.boomi.connector.testutil.ConnectorTester;
 import com.boomi.connector.testutil.SimpleOperationResult;
 
 public class CacheConnectorEntraAuthGetTest {
+    // static {
+    //     System.setProperty("io.netty.handler.ssl.noOpenSsl", "true");
+    //     System.setProperty("io.netty.noNative", "true");
+    //     System.setProperty("io.netty.noNativeEventLoop", "true");
+    //     System.setProperty("reactor.netty.http.native.useNativeTransport", "false");
+        
+    //     // Suppress Netty logging
+    //     java.util.logging.Logger.getLogger("io.netty").setLevel(java.util.logging.Level.WARNING);
+    // }
     private static final Logger LOGGER = Logger.getLogger(CacheConnectorEntraAuthGetTest.class.getName());
     private Properties testConfig;
 
     private void loadTestProperties() throws IOException {
         testConfig = new Properties();
         try {
-            testConfig.load(getClass().getResourceAsStream("msEntraAuth.properties"));
+            testConfig.load(getClass().getResourceAsStream("/msEntraAuth.properties"));
         } catch (IOException e) {
             LOGGER.severe("Failed to load test properties. Make sure msEntraAuth.properties exists in src/test/resources");
             throw e;
@@ -73,8 +85,22 @@ public class CacheConnectorEntraAuthGetTest {
         LOGGER.info("Actual Results: " + actualResults);
     }
 
+    public void testMicrosoftEntraClientSecretCredential() throws IOException {
+        System.out.println("Testing Microsoft Entra Client Secret Credential Start...");
+        loadTestProperties();
+        System.out.println("Testing Microsoft Entra Client Secret Credential...");
+        new MicrosoftEntraClientSecretCredential(
+            testConfig.getProperty("azure.tenant.id"),
+            testConfig.getProperty("azure.client.id"),
+            testConfig.getProperty("azure.client.secret")
+        );
+
+    }
+
+
     public static void main(String[] args) {
 		try {
+            //new CacheConnectorEntraAuthGetTest().testMicrosoftEntraClientSecretCredential();
 			new CacheConnectorEntraAuthGetTest().testGetOperation();
             System.out.println("Test completed successfully.");
 		} catch (Exception e) {

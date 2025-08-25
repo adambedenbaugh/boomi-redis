@@ -1,10 +1,8 @@
 package com.boomi.proserv.caching.impl;
 
-// import com.boomi.execution.ExecutionUtil;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.*;
 
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.logging.Logger;
 
@@ -38,7 +36,7 @@ public class CacheJedisWrapper {
 		if(hosts != null && hosts.length()>0) {
 			//Cluster
 			if(hosts.contains(",")) {
-				getLogger().info("Connecting to Redis with hosts list: " + hosts);
+				// getLogger().info("Connecting to Redis with hosts list: " + hosts);
 	
 				String[] pairs = hosts.split(",");
 				Set<HostAndPort> jedisClusterNodes = new HashSet<HostAndPort>();
@@ -48,7 +46,7 @@ public class CacheJedisWrapper {
 				}
 
 				if(password != null && password.length()>0) {
-					logger.info("Creating Redis with hosts list: " + hosts);
+					// logger.info("Creating Redis with hosts list: " + hosts);
 					if(poolEnabled) {
 						GenericObjectPoolConfig<Jedis> poolConfig = new GenericObjectPoolConfig<>();
 						poolConfig.setMaxWait(java.time.Duration.ofMillis(S_TIMEOUT));
@@ -67,7 +65,7 @@ public class CacheJedisWrapper {
 						);
 						
 					} else {
-						logger.info("Creating Redis with hosts list and no pooling");
+						// logger.info("Creating Redis with hosts list and no pooling");
 						
 						jedisCluster = new JedisCluster(
 							jedisClusterNodes,
@@ -83,8 +81,7 @@ public class CacheJedisWrapper {
 						
 					}
 				} else {
-					//jedisCluster = new JedisCluster(jedisClusterNodes);
-					logger.fine("Connection to Redis with no password");
+					// logger.fine("Connection to Redis with no password");
 					if(poolEnabled) {
 						GenericObjectPoolConfig<Jedis> poolConfig = new GenericObjectPoolConfig<>();
 						poolConfig.setMaxWait(java.time.Duration.ofMillis(S_TIMEOUT));
@@ -114,25 +111,14 @@ public class CacheJedisWrapper {
 					}
 				}
 
-				//Creation of Handler
-//				Field connectionHandlerField;
-//				try {
-//					connectionHandlerField = findUnderlying(JedisCluster.class,"connectionHandler");
-//					connectionHandlerField.setAccessible(true);
-//					jedisConnHandler = (JedisClusterConnectionHandler) connectionHandlerField.get(jedisCluster);
-//					getLogger().info("Pool created");
-//				} catch (Exception e) {
-//					Utils.throwException(e);
-//				}
-
 				jedisConnHandler = null;
 
-				getLogger().info("Done creating Redis with hosts list");
+				//getLogger().info("Done creating Redis with hosts list");
 
 			} 
 			//Single Node
 			else {
-				getLogger().info("Trying to create Redis with single host " + hosts);
+				//getLogger().info("Trying to create Redis with single host " + hosts);
 				String[] pair = hosts.split(":");
 
 				if(pair.length != 2) {
@@ -183,7 +169,7 @@ public class CacheJedisWrapper {
 						);
 					}
 				}
-				getLogger().info("Done creating Redis with single host");
+				//getLogger().info("Done creating Redis with single host");
 				jedisCluster = null;
 			}
 		} else {
@@ -252,7 +238,7 @@ public class CacheJedisWrapper {
 					for (String thisKey : responses.keySet()) {
 						Response<String> r = (Response<String>) responses.get(thisKey);
 						result.put(thisKey, r.get());
-						getLogger().finest("retrieved key: " + thisKey + " and value: " + r.get());
+						//getLogger().finest("retrieved key: " + thisKey + " and value: " + r.get());
 					}
 				}
 				cur = scanResult.getCursor();
@@ -365,16 +351,6 @@ public class CacheJedisWrapper {
 		return Logger.getLogger(this.getClass().getName());
 	}
 
-	// private Field findUnderlying(Class<?> clazz, String fieldName) {
-	// 	Class<?> current = clazz;
-	// 	do {
-	// 		try {
-	// 			return current.getDeclaredField(fieldName);
-	// 		} catch(Exception e) {}
-	// 	} while((current = current.getSuperclass()) != null);
-
-	// 	return null;
-	// }
 }
 
 class Utils

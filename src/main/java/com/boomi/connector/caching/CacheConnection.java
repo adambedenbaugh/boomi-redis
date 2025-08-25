@@ -1,15 +1,11 @@
 package com.boomi.connector.caching;
 
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Iterator;
+// import java.util.Date;
+// import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Timer;
-import java.util.TimerTask;
-
-import org.apache.commons.codec.digest.DigestUtils;
+// import java.util.Timer;
+// import java.util.TimerTask;
 
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
@@ -24,41 +20,41 @@ import com.boomi.proserv.caching.CacheInstance;
  */
 public class CacheConnection extends BaseConnection {
 
-	private static Map<String, CacheInstance> s_cacheInstance;
-	private static Timer s_timer;
+	// private static Map<String, CacheInstance> s_cacheInstance;
+	// private static Timer s_timer;
 
-	//Every 1 minute
-	private static long DELAY 				= 1 * 60000L;
-	private static long PERIOD 				= 1 * 60000L;
+	// //Every 1 minute
+	// private static long DELAY 				= 1 * 60000L;
+	// private static long PERIOD 				= 1 * 60000L;
 
-	//Default Inactive Period: 1 hour
-	private static long INACTIVE_PERIOD 	= 3600 * 60000L;
+	// //Default Inactive Period: 1 hour
+	// private static long INACTIVE_PERIOD 	= 3600 * 60000L;
 
 	PropertyMap propertiesMap;
 
-	static {
-		TimerTask repeatedTask = new TimerTask() {
-			public void run() {
-				System.out.println("Cleaning  " + new Date());
-				if(s_cacheInstance != null) {
-					for (Iterator<String> iterator = s_cacheInstance.keySet().iterator(); iterator.hasNext();) {
-						String currentInstanceName = iterator.next();
-						CacheInstance currentInstance = s_cacheInstance.get(currentInstanceName);
-						if(currentInstance != null && currentInstance.getLastUsedDate() != null) {
-							if((currentInstance.getLastUsedDate().getTime()-new Date().getTime())>=INACTIVE_PERIOD) {
-								currentInstance.close();
-								s_cacheInstance.remove(currentInstanceName);
-							}
-						}
-					}
-				}
-			}
-		};
-		s_timer = new Timer("CacheConnection_cleanup");
+	// static {
+	// 	TimerTask repeatedTask = new TimerTask() {
+	// 		public void run() {
+	// 			System.out.println("Cleaning  " + new Date());
+	// 			if(s_cacheInstance != null) {
+	// 				for (Iterator<String> iterator = s_cacheInstance.keySet().iterator(); iterator.hasNext();) {
+	// 					String currentInstanceName = iterator.next();
+	// 					CacheInstance currentInstance = s_cacheInstance.get(currentInstanceName);
+	// 					if(currentInstance != null && currentInstance.getLastUsedDate() != null) {
+	// 						if((currentInstance.getLastUsedDate().getTime()-new Date().getTime())>=INACTIVE_PERIOD) {
+	// 							currentInstance.close();
+	// 							s_cacheInstance.remove(currentInstanceName);
+	// 						}
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+	// 	};
+	// 	s_timer = new Timer("CacheConnection_cleanup");
 
 
-		s_timer.scheduleAtFixedRate(repeatedTask, DELAY, PERIOD);
-	}
+	// 	s_timer.scheduleAtFixedRate(repeatedTask, DELAY, PERIOD);
+	// }
 
 	public CacheConnection(BrowseContext context) {
 		super(context);
@@ -67,48 +63,33 @@ public class CacheConnection extends BaseConnection {
 
 	private CacheInstance getInstance() throws Exception {
 		CacheInstance cacheInstance = null;
-
 		try {
-			String propertiesHash = DigestUtils.sha256Hex(propertiesMap.toString());
 
-			if(s_cacheInstance!=null) {
-				cacheInstance = s_cacheInstance.get(propertiesHash);
-			} else {
-				synchronized(this){
-					s_cacheInstance = Collections.synchronizedMap(new HashMap<String, CacheInstance>());
-				}
+			Properties properties = new Properties();
+			cacheInstance = new CacheInstance();
+			cacheInstance.setStandalone(false);
+			String type = propertiesMap.getProperty("type");
+			cacheInstance.setType(type);
+
+			String authenticationType = propertiesMap.getProperty("authenticationType");
+			switch (authenticationType) {
+				case "Basic":
+					properties.put(type + "." + "user", propertiesMap.getProperty("user"));
+					properties.put(type + "." + "password", propertiesMap.getProperty("password"));
+					break;
+				case "MicrosoftEntraClientSecretCredential":
+					String clientId = propertiesMap.getProperty("clientId");
+					String clientSecret = propertiesMap.getProperty("clientSecret");
+					String tenantId = propertiesMap.getProperty("tenantId");
+
+					MicrosoftEntraClientSecretCredential credential = new MicrosoftEntraClientSecretCredential(tenantId, clientId, clientSecret);
+
+					properties.put(type + "." + "user", credential.getUsername());
+					properties.put(type + "." + "password", credential.getToken());
+					break;
+				default:
+					// No authentication
 			}
-
-			if(cacheInstance == null || !cacheInstance.isValid()){
-				synchronized(this){
-					Properties properties = new Properties();
-					cacheInstance = new CacheInstance();
-					cacheInstance.setStandalone(false);
-					cacheInstance.setDynamicProcessPropertiesFilter(propertiesMap.getProperty("properties_filter"));
-					//cacheInstance.setHashing(propertiesMap.getBooleanProperty("hashing"));
-					String type = propertiesMap.getProperty("type");
-					cacheInstance.setType(type);
-
-					String authenticationType = propertiesMap.getProperty("authenticationType");
-					switch (authenticationType) {
-						case "Basic":
-							properties.put(type + "." + "user", propertiesMap.getProperty("user"));
-							properties.put(type + "." + "password", propertiesMap.getProperty("password"));
-							break;
-						case "MicrosoftEntraClientSecretCredential":
-							String clientId = propertiesMap.getProperty("clientId");
-							String clientSecret = propertiesMap.getProperty("clientSecret");
-							String tenantId = propertiesMap.getProperty("tenantId");
-
-							MicrosoftEntraClientSecretCredential credential = new MicrosoftEntraClientSecretCredential(tenantId, clientId, clientSecret);
-
-							properties.put(type + "." + "user", credential.getUsername());
-							properties.put(type + "." + "password", credential.getToken());
-							break;
-						default:
-							// No authentication
-					}
-
 					properties.put(type + "." + "heap", 			propertiesMap.getProperty("heap"));
 					properties.put(type + "." + "hosts", 			propertiesMap.getProperty("hosts"));
 					properties.put(type + "." + "useSSL", 			propertiesMap.getBooleanProperty("useSSL").toString());
@@ -118,14 +99,8 @@ public class CacheConnection extends BaseConnection {
 					} else {
 						properties.put(type + "." + "poolSize", "1");
 					}
-					//properties.put(type + "." + "poolSize", 		propertiesMap.getLongProperty("poolSize").toString());
 					cacheInstance.setProperties(properties);
 					cacheInstance.init();
-					s_cacheInstance.put(propertiesHash, cacheInstance);
-				}
-			}
-
-			//TODO, put a timestamp of last used on cacheInstance
 
 			return cacheInstance;
 		} catch (Exception e) {
@@ -151,10 +126,6 @@ public class CacheConnection extends BaseConnection {
 
 	public void delete(String cacheName, String key) throws Exception {
 		getInstance().delete(cacheName, key);
-	}
-
-	public String computeKey(Properties properties) throws Exception {
-		return getInstance().computeKey(properties);
 	}
 
 }

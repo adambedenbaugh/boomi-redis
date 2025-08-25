@@ -48,11 +48,8 @@ public class CacheUpsertOperation extends BaseUpdateOperation {
 			try {
 				String inputStr = CacheUtils.inputStreamToString(input.getData());
 				Document doc = CacheUtils.parse(CacheUtils.stringToInputStream(inputStr));
-				//logger.info("ARA: Content " + CacheUtils.toString(doc));
 				String objectId = CacheUtils.getFirstNodeTextContent(doc, "//Upsert/ID");
-				// if(autoKey) {
-				// 	objectId = getConnection().computeKey(CacheInstance.getContextProperties());
-				// }
+
 				String value = CacheUtils.getFirstNodeTextContent(doc, "//Upsert/Value");
 				getConnection().upsert(cacheName, objectId, value, ttl);
 
@@ -63,7 +60,7 @@ public class CacheUpsertOperation extends BaseUpdateOperation {
 				ResponseUtil.addExceptionFailure(response, input, e);
 			}
 		}
-		logger.fine("ARA: End of processing");
+		logger.fine("End of processing");
 	}
 
 	@Override

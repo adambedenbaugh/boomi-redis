@@ -80,7 +80,7 @@ public class CacheGetOperation extends BaseGetOperation {
 
 			} else {//Get All
 				Map<String,String> cachedValue = getConnection().get(cacheName, ttl);
-
+				System.out.println("cachedValue: " + cachedValue);
 				if(throwException && cachedValue==null) {
 					ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
 				}
