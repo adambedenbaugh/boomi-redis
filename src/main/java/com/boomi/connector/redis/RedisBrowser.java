@@ -1,4 +1,4 @@
-package com.boomi.connector.caching;
+package com.boomi.connector.redis;
 
 import java.net.URL;
 import java.util.Collection;
@@ -13,19 +13,19 @@ import com.boomi.connector.api.ObjectDefinitionRole;
 import com.boomi.connector.api.ObjectDefinitions;
 import com.boomi.connector.api.ObjectType;
 import com.boomi.connector.api.ObjectTypes;
+import com.boomi.connector.redis.util.RedisUtils;
 import com.boomi.connector.util.BaseBrowser;
-import com.boomi.proserv.caching.CacheUtils;
 
 /**
  * 
  * @author anthony.rabiaza@gmail.com
  *
  */
-public class CacheBrowser extends BaseBrowser {
+public class RedisBrowser extends BaseBrowser {
 
 	private static final String TYPE_ELEMENT = "type";
 
-	protected CacheBrowser(CacheConnection conn) {
+	protected RedisBrowser(RedisConnection conn) {
 		super(conn);
 	}
 
@@ -33,7 +33,7 @@ public class CacheBrowser extends BaseBrowser {
 	public ObjectTypes getObjectTypes() {
 		try {
 			URL url = this.getClass().getClassLoader().getResource("metadata.xml");
-			Document typeDoc = CacheUtils.parse(url.openStream());
+			Document typeDoc = RedisUtils.parse(url.openStream());
 			NodeList typeList = typeDoc.getElementsByTagName(TYPE_ELEMENT);
 			ObjectTypes types = new ObjectTypes();
 			for (int i = 0; i < typeList.getLength(); ++i) {
@@ -54,7 +54,7 @@ public class CacheBrowser extends BaseBrowser {
 			Collection<ObjectDefinitionRole> roles) {
 		try {
 			URL url = this.getClass().getClassLoader().getResource(objectTypeId.toLowerCase() + ".xsd");
-            Document defDoc = CacheUtils.parse(url.openStream());
+            Document defDoc = RedisUtils.parse(url.openStream());
             ObjectDefinitions defs = new ObjectDefinitions();
             ObjectDefinition def = new ObjectDefinition();
             def.setSchema(defDoc.getDocumentElement());
@@ -70,12 +70,12 @@ public class CacheBrowser extends BaseBrowser {
 	}
 
 	@Override
-	public CacheConnection getConnection() {
-		return (CacheConnection) super.getConnection();
+	public RedisConnection getConnection() {
+		return (RedisConnection) super.getConnection();
 	}
 
 	public static void main(String[] args) {
-		ObjectTypes o = new CacheBrowser(null).getObjectTypes();
+		ObjectTypes o = new RedisBrowser(null).getObjectTypes();
 		System.out.println(o);
 	}
 }

@@ -1,4 +1,4 @@
-package com.boomi.proserv.caching;
+package com.boomi.connector.redis.util;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -29,7 +29,7 @@ import org.xml.sax.SAXException;
 
 import com.boomi.util.IOUtil;
 
-public class CacheUtils {
+public class RedisUtils {
 
 	/**
 	 * Utility to convert InputStream to String

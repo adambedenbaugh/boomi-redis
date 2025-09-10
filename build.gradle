@@ -4,10 +4,11 @@ plugins {
     id 'com.boomi.connector' version '0.3.4'
     id 'java-library'
     id 'jvm-test-suite'
+    id 'com.github.ben-manes.versions' version '0.52.0'
 }
 
 connector {
-    className = 'com.boomi.connector.caching.CacheConnector'
+    className = 'com.boomi.connector.redis.RedisConnector'
 }
 
 tasks.named('connectorConfig').configure {
@@ -21,8 +22,8 @@ tasks.named('connectorConfig').configure {
     }
 }
 
-archivesBaseName = 'BoomiCacheConnector'
-group = 'com.boomi.connector.cache'
+archivesBaseName = 'BoomiRedisConnector'
+group = 'com.boomi.connector.redis'
 version = '0.91'
 
 ext {
@@ -32,8 +33,8 @@ ext {
 compileTestJava.dependsOn connectorConfig
 compileTestJava.dependsOn connectorOverridesFile
 
-    sourceCompatibility = '11'
-    targetCompatibility = '11'
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
 
     repositories {
         mavenCentral()
@@ -49,14 +50,14 @@ dependencies {
     implementation group: 'com.boomi.util', name: 'boomi-util', version: sdkBoomiVersion
     
     implementation group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.14'
-    implementation group: 'com.google.code.gson', name: 'gson', version: '2.10.1'
-    implementation group: 'org.apache.commons', name: 'commons-pool2', version: '2.4.2'
-    implementation group: 'commons-codec', name: 'commons-codec', version: '1.15'
-    implementation group: 'redis.clients', name: 'jedis', version: '3.10.0'
+    implementation group: 'com.google.code.gson', name: 'gson', version: '2.13.1'
+    implementation group: 'org.apache.commons', name: 'commons-pool2', version: '2.12.1'
+    implementation group: 'commons-codec', name: 'commons-codec', version: '1.19.0'
+    // Using Jedis 5.2.0 because it supports Redis 6 and above, which includes Azure Cache for Redis
+    implementation group: 'redis.clients', name: 'jedis', version: '5.2.0'
     
     testImplementation group: 'com.boomi.connsdk', name: 'connector-sdk-test-util', version: sdkBoomiVersion
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-    testImplementation group: 'org.hamcrest', name: 'hamcrest-core', version: '1.3'
 }
 
     test {
@@ -77,7 +78,7 @@ dependencies {
         
         into('/lib') {
             from configurations.runtimeClasspath
-            from 'lib' // for local jar files
+            from 'lib' 
         }
     }    
 
@@ -88,6 +89,14 @@ dependencies {
             include "connector-descriptor.xml"
             include "connector-config.xml"
         }
+    }
+
+    task runEntraAuthTest(type: JavaExec) {
+        description = 'Run the CacheConnectorEntraAuthGetTest'
+        group = 'verification'
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = 'com.boomi.connector.redis.CacheConnectorEntraAuthGetTest'
+        dependsOn compileTestJava
     }
 
     build.dependsOn copyUploadArtifacts    

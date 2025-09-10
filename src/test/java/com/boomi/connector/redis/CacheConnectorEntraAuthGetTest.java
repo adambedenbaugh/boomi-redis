@@ -1,4 +1,4 @@
-package com.boomi.connector.caching;
+package com.boomi.connector.redis;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -10,19 +10,22 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.boomi.connector.api.OperationType;
+import com.boomi.connector.redis.RedisConnector;
+import com.boomi.connector.redis.authentication.MicrosoftEntraClientSecretCredential;
 import com.boomi.connector.testutil.ConnectorTester;
 import com.boomi.connector.testutil.SimpleOperationResult;
 
-public class CacheConnectorBasicAuthGetTest {
-    private static final Logger LOGGER = Logger.getLogger(CacheConnectorBasicAuthGetTest.class.getName());
+public class CacheConnectorEntraAuthGetTest {
+
+    private static final Logger LOGGER = Logger.getLogger(CacheConnectorEntraAuthGetTest.class.getName());
     private Properties testConfig;
 
     private void loadTestProperties() throws IOException {
         testConfig = new Properties();
         try {
-            testConfig.load(getClass().getResourceAsStream("basicAuth.properties"));
+            testConfig.load(getClass().getResourceAsStream("/msEntraAuth.properties"));
         } catch (IOException e) {
-            LOGGER.severe("Failed to load test properties. Make sure basicAuth.properties exists in src/test/resources");
+            LOGGER.severe("Failed to load test properties. Make sure msEntraAuth.properties exists in src/test/resources");
             throw e;
         }
     }
@@ -38,24 +41,29 @@ public class CacheConnectorBasicAuthGetTest {
         // Load test configuration
         loadTestProperties();
 
-        CacheConnector connector = new CacheConnector();
+        RedisConnector connector = new RedisConnector();
         ConnectorTester tester = new ConnectorTester(connector);
         
         // Connection properties
         Map<String, Object> connProps = new HashMap<>();
-        connProps.put("type", "com.boomi.proserv.caching.impl.CacheRedis");
-        connProps.put("heap", "1024");
+        //connProps.put("type", "com.boomi.proserv.caching.impl.CacheRedis");
+        //connProps.put("heap", "1024");
         connProps.put("hosts", testConfig.getProperty("redis.host"));
         connProps.put("useSSL", Boolean.parseBoolean(testConfig.getProperty("redis.ssl")));
-        connProps.put("password", testConfig.getProperty("redis.password"));
-        connProps.put("user", testConfig.getProperty("redis.user"));
-        connProps.put("authenticationType", "Basic");
+        connProps.put("clientId", testConfig.getProperty("azure.client.id"));
+        connProps.put("clientSecret", testConfig.getProperty("azure.client.secret"));
+        connProps.put("tenantId", testConfig.getProperty("azure.tenant.id"));
+        connProps.put("authenticationType", "MicrosoftEntraClientSecretCredential");
         connProps.put("poolEnabled", Boolean.parseBoolean(testConfig.getProperty("redis.pool.enabled")));
-        connProps.put("poolSize", Long.parseLong(testConfig.getProperty("redis.pool.size")));
+        if(testConfig.getProperty("redis.pool.size") != null && !testConfig.getProperty("redis.pool.size").isEmpty()) {
+            System.out.println("Using pool size: " + testConfig.getProperty("redis.pool.size"));
+            connProps.put("poolSize", Long.parseLong(testConfig.getProperty("redis.pool.size")));
+        } 
+        
 
         // Operation properties
         Map<String, Object> opProps = new HashMap<>();
-        opProps.put("cache_name", testConfig.getProperty("redis.cache.name"));
+        opProps.put("key_prefix", testConfig.getProperty("redis.cache.name"));
         opProps.put("auto_key", Boolean.parseBoolean(testConfig.getProperty("redis.auto.key")));
         opProps.put("wrap_inprofile", Boolean.parseBoolean(testConfig.getProperty("redis.wrap.inprofile")));
         opProps.put("throw_exception", Boolean.parseBoolean(testConfig.getProperty("redis.throw.exception")));
@@ -68,9 +76,23 @@ public class CacheConnectorBasicAuthGetTest {
         LOGGER.info("Actual Results: " + actualResults);
     }
 
+    public void testMicrosoftEntraClientSecretCredential() throws IOException {
+        System.out.println("Testing Microsoft Entra Client Secret Credential Start...");
+        loadTestProperties();
+        System.out.println("Testing Microsoft Entra Client Secret Credential...");
+        new MicrosoftEntraClientSecretCredential(
+            testConfig.getProperty("azure.tenant.id"),
+            testConfig.getProperty("azure.client.id"),
+            testConfig.getProperty("azure.client.secret")
+        );
+
+    }
+
+
     public static void main(String[] args) {
 		try {
-			new CacheConnectorBasicAuthGetTest().testGetOperation();
+            //new CacheConnectorEntraAuthGetTest().testMicrosoftEntraClientSecretCredential();
+			new CacheConnectorEntraAuthGetTest().testGetOperation();
             System.out.println("Test completed successfully.");
 		} catch (Exception e) {
 			e.printStackTrace();

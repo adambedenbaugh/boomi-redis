@@ -1,6 +1,6 @@
-Fork of [BoomiCacheConnector](https://bitbucket.org/officialboomi/boomicacheconnector/src/master/)
 
-# Boomi Cache Connector v2 (with TTL)
+
+# Boomi Redis Connector
 
 I wanted to share a solution I recently developed to have high-throughput in the Dell Boomi AtomSphere Platform: use of Cache Pattern with In-Memory Data Grid or In-Memory Database (cf [IMDG/IMDB](https://en.wikipedia.org/wiki/List_of_in-memory_databases). 
 The Connector is designed to allow the use of a Caching/In-Memory Data Grid/Database in Boomi and thus, provide high-throughput APIs and Processes which stored information in Memory and avoid unnecessary calls to the backend system for read/query scenarios.
@@ -120,59 +120,9 @@ For additional security, you can also update the Redis firewall to allow only yo
 
 ## Use of Redis on Atom Cloud
 
-Pooling need to be disable to make the Redis connector working on Test Atom Cloud or Atom Cloud. Please set the Maximum Heap or Configuration file to "nopool"
+Pooling need to be disable to make the Redis connector working on the Boomi Public Runtime Cloud. 
 
-Version up to 0.78
 
-![Alt text](resources/Azure_Redis_Atom_Cloud.png?raw=true "BoomiCache")
 
-Version equals to 0.79 or above
 
-![img.png](resources/Azure_Redis_Atom_Cloud_v2.png)
-
-## Use of ehcache configuration file
-
-You have to place the following content in a file (for instance /opt/Dell_Boomi/Atom/conf/ehcache.xml), go the connector configuration and set the value of **Maximum Heap or Configuration file (EHCache)** property to the full path of the previous file.
-
-```
-<?xml version="1.0" encoding="UTF-8"?>
-
-<ehcache:config xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
-	xmlns:ehcache='http://www.ehcache.org/v3'
-	xsi:schemaLocation="http://www.ehcache.org/v3 http://www.ehcache.org/schema/ehcache-core-3.1.xsd">
-
-	<ehcache:cache alias="BoomiCache">
-		<ehcache:key-type>java.lang.String</ehcache:key-type>
-		<ehcache:value-type>java.lang.String</ehcache:value-type>
-		<ehcache:expiry>
-			<ehcache:ttl unit="seconds">10</ehcache:ttl>
-		</ehcache:expiry>
-		<ehcache:resources>
-			<ehcache:heap unit="entries">100</ehcache:heap>
-			<ehcache:offheap unit="MB">1</ehcache:offheap>
-		</ehcache:resources>
-	</ehcache:cache>
-	
-</ehcache:config>
-```
-
-# Update of libraries
-
-To update the internal libraries, open the Archive Zip with your favorite Archive Management tool (7Zip, Winzip, etc.). Go to the lib folder and update the jars:
-
-![Archive](./resources/Archive.png?raw=true)
-
-**List of libraries**
-
-EHCache:
-
-- ehcache-X.Y.Z.jar (https://github.com/ehcache/ehcache3)
-
-MemCached:
-
-- spymemcached-X.Y.Z.jar (https://github.com/couchbase/spymemcachedd)
-
-Redis:
-
-- jedis-X.Y.Z.jar (https://github.com/xetorthio/jedis)
-- commons-pool2-X.Y.Z.jar
+Fork of [BoomiCacheConnector](https://bitbucket.org/officialboomi/boomicacheconnector/src/master/).

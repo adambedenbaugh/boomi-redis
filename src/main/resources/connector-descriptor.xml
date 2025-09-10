@@ -24,14 +24,14 @@
         <helpText>For Redis Standalone, please provide the host and port separate with a semi-colon. For Redis Clustered, please provide the list of the hosts with a comma to separate them. For instance: host1:port1,host2:port2</helpText>
         <defaultValue>localhost:6379</defaultValue>
     </field>
-    
-     <field id="useSSL" label="Use SSL" type="boolean">
-        <helpText>Enable this option to use SSL with Azure Cachse for Redis. Default SSL Port is 6380.</helpText>
+
+    <field id="useSSL" label="Use SSL" type="boolean">
+        <helpText>Default non-SSL port is 6379. Default SSL port is 6380.</helpText>
         <defaultValue>false</defaultValue>
     </field>
     
     <field id="authenticationType" label="Authentication Type" type="string" displayType="list">
-        <helpText>For Redis, you can provide the authentication type. If using Azure Redis Cache, please select Microsoft Entra Client Secret Credential</helpText>
+        <helpText>Provide the authentication type. Select Microsoft Entra Client Secret Credential for Azuru Cache for Redis.</helpText>
         <defaultValue>None</defaultValue>
         <allowedValue label="None">
             <value>None</value>
@@ -94,33 +94,50 @@
         </visibilityCondition>
     </field>
 
-    <!-- <field id="properties_filter" label="Dynamics Process Properties Filter" type="string">
-        <helpText>For the Automatic Key Computation (for RESTFul APIs), you can set the regular expression to filter HTTP queries and HTTP parameters</helpText>
-        <defaultValue>(query_.*)|(param_.*)</defaultValue>
-    </field> -->
-    
-    <!-- <field id="hashing" label="Apply SHA Hashing during Automatic Key Computation" type="boolean">
-        <helpText>Apply SHA Hashing during Automatic Key Computation</helpText>
-        <defaultValue>false</defaultValue>
-    </field> -->
-
     <field id="poolEnabled" label="Enable Connection Pooling" type="boolean">
-        <helpText>If using Redis, enable connection pooling</helpText>
-        <defaultValue>true</defaultValue>
+        <helpText>Select to enable connection pooling and make other fields active. Connection pooling may increase performance by using resources more efficiently. Connection pools are per JVM.</helpText>
+        <defaultValue>false</defaultValue>
     </field>
 
-    <field id="poolSize" label="Size of the connection pool" type="integer">
-        <helpText>If using Redis, pool size</helpText>
-        <defaultValue>8</defaultValue>
+    <field id="poolSize" label="Maximum Connections" type="integer">
+        <helpText>Maximum pool size.</helpText>
+        <defaultValue>4</defaultValue>
         <visibilityCondition>
             <valueCondition fieldId="poolEnabled">
                 <value>true</value>
             </valueCondition>
         </visibilityCondition>
     </field>
+    <!-- <field id="minPoolSize" label="Minimum Connections" type="integer">
+        <helpText>Minimum pool size.</helpText>
+        <defaultValue>1</defaultValue>
+        <visibilityCondition>
+            <valueCondition fieldId="poolEnabled">
+                <value>true</value>
+            </valueCondition>
+        </visibilityCondition>
+    </field>
+    <field id="maxIdleTime" label="Maximum Idle Time" type="integer">
+        <helpText>Maximum idle time in seconds for connections in the pool.</helpText>
+        <defaultValue>60</defaultValue>
+        <visibilityCondition>
+            <valueCondition fieldId="poolEnabled">
+                <value>true</value>
+            </valueCondition>
+        </visibilityCondition>
+    </field>
+    <field id="maxWaitTime" label="Maximum Wait Time" type="integer">
+        <helpText>Maximum wait time in seconds for a connection from the pool.</helpText>
+        <defaultValue>60</defaultValue>
+        <visibilityCondition>
+            <valueCondition fieldId="poolEnabled">
+                <value>true</value>
+            </valueCondition>
+        </visibilityCondition>
+    </field> -->
 	
 	<operation types="GET" supportsBrowse="true">
-		<field id="cache_name" label="Key Prefix" type="string">
+		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
@@ -136,14 +153,14 @@
             <helpText>Throw Exception when no result if found in the Cache. You will have to Catch the Exception and query the Backend System</helpText>
             <defaultValue>false</defaultValue>
         </field>
-        <field id="set_ttl" label="Set Time To Live (TTL)" type="integer">
+        <!-- <field id="set_ttl" label="Set Time To Live (TTL)" type="integer">
             <helpText>Set the time to live (TTL) to some number of milliseconds for every record returned. Set this to -1 to disable a change to TTL. (Redis only)</helpText>
             <defaultValue>-1</defaultValue>
-        </field>
+        </field> -->
 	</operation>
 	
 	<operation types="UPSERT" supportsBrowse="true">
-		<field id="cache_name" label="Key Prefix" type="string">
+		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
@@ -151,14 +168,14 @@
             <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
             <defaultValue>false</defaultValue>
         </field>
-        <field id="set_ttl" label="Set Time To Live (TTL)" type="integer">
-            <helpText>Set the time to live (TTL) to some number of milliseconds for every record returned. Set this to -1 to disable a change to TTL. (Redis and Memcached)</helpText>
+        <field id="set_ttl" label="Set Time To Live (TTL)" type="integer" overrideable="true">
+            <helpText>Set the time to live (TTL) in milliseconds. Set to -1 to disable a change to TTL.</helpText>
             <defaultValue>-1</defaultValue>
         </field>
 	</operation>
 	
 	<operation types="DELETE" supportsBrowse="true">
-		<field id="cache_name" label="Key Prefix" type="string">
+		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>

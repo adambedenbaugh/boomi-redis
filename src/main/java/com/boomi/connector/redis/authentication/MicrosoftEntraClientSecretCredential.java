@@ -1,4 +1,4 @@
-package com.boomi.connector.caching.authentication;
+package com.boomi.connector.redis.authentication;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

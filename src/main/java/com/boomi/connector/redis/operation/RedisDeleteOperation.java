@@ -1,13 +1,15 @@
-package com.boomi.connector.caching;
+package com.boomi.connector.redis.operation;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.boomi.connector.api.DeleteRequest;
 import com.boomi.connector.api.ObjectIdData;
+import com.boomi.connector.api.OperationContext;
 import com.boomi.connector.api.OperationResponse;
 import com.boomi.connector.api.OperationStatus;
 import com.boomi.connector.api.ResponseUtil;
+import com.boomi.connector.redis.RedisConnection;
 import com.boomi.connector.util.BaseDeleteOperation;
 
 /**
@@ -15,10 +17,10 @@ import com.boomi.connector.util.BaseDeleteOperation;
  * @author anthony.rabiaza@gmail.com
  *
  */
-public class CacheDeleteOperation extends BaseDeleteOperation {
+public class RedisDeleteOperation extends BaseDeleteOperation {
 
-	protected CacheDeleteOperation(CacheConnection conn) {
-		super(conn);
+	public RedisDeleteOperation(OperationContext context) {
+		super(context);
 	}
 
 	@Override
@@ -26,23 +28,25 @@ public class CacheDeleteOperation extends BaseDeleteOperation {
 		Logger logger = response.getLogger();
 		logger.fine("executeDelete");
 		
-		String cacheName = getContext().getOperationProperties().getProperty("cache_name");
-		logger.fine("CacheName: " + cacheName);
+		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix");
+		logger.fine("KeyPrefix: " + keyPrefix);
 		
 		boolean autoKey = getContext().getOperationProperties().getBooleanProperty("auto_key");
 		logger.fine("AutoKey: " + autoKey);
+		
+		RedisConnection redisConnection = new RedisConnection(getContext());
 		
 		int i=0;
 		for (ObjectIdData input : request) {
 			logger.fine("Processing input " + i++);
             try {
-            	logger.info("Deleting " + cacheName + input.getObjectId());
+            	logger.info("Deleting " + keyPrefix + input.getObjectId());
             	String objectId = input.getObjectId();
             	if("*".equals(objectId)) {
             		logger.fine("Found wildcard objectId - executing batch delete");
-            		getConnection().delete(cacheName);
+            		delete(redisConnection, keyPrefix);
             	} else {
-            		getConnection().delete(cacheName, objectId);
+            		delete(redisConnection, keyPrefix, objectId);
             	}
                 response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
             }
@@ -55,8 +59,13 @@ public class CacheDeleteOperation extends BaseDeleteOperation {
 		logger.fine("End of processing");
 	}
 
-	@Override
-    public CacheConnection getConnection() {
-        return (CacheConnection) super.getConnection();
-    }
+	// Convenience methods for the connector operations
+	public void delete(RedisConnection redisConnection, String keyPrefix) {
+		redisConnection.delAll(keyPrefix + "*");
+	}
+
+	public void delete(RedisConnection redisConnection, String keyPrefix, String key) {
+		String combinedKey = keyPrefix + ":" + key;
+		redisConnection.del(combinedKey);
+	}
 }
