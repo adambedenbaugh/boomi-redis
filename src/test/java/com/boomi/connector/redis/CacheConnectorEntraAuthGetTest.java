@@ -5,17 +5,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.logging.ConsoleHandler;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import com.boomi.connector.api.OperationType;
-import com.boomi.connector.redis.authentication.MicrosoftEntraClientSecretCredential;
 import com.boomi.connector.testutil.ConnectorTester;
 import com.boomi.connector.testutil.SimpleOperationResult;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+
+@Category(IntegrationTest.class)
 public class CacheConnectorEntraAuthGetTest {
 
     private static final Logger LOGGER = Logger.getLogger(CacheConnectorEntraAuthGetTest.class.getName());
@@ -33,80 +35,50 @@ public class CacheConnectorEntraAuthGetTest {
 
     @Test
     public void testGetOperation() throws Exception {
-        // Configure logging to show all levels
-        // Logger rootLogger = Logger.getLogger("");
-        // rootLogger.setLevel(Level.ALL);
-        // ConsoleHandler handler = new ConsoleHandler();
-        // handler.setLevel(Level.ALL);
-        // rootLogger.addHandler(handler);
-
-        // Load test configuration
         loadTestProperties();
 
         RedisConnector connector = new RedisConnector();
         ConnectorTester tester = new ConnectorTester(connector);
-        
+
         // Connection properties
         Map<String, Object> connProps = new HashMap<>();
         connProps.put("hosts", testConfig.getProperty("redis.host"));
         connProps.put("useSSL", Boolean.parseBoolean(testConfig.getProperty("redis.ssl")));
-        connProps.put("clientId", testConfig.getProperty("azure.client.id"));
-        connProps.put("clientSecret", testConfig.getProperty("azure.client.secret"));
-        connProps.put("tenantId", testConfig.getProperty("azure.tenant.id"));
         connProps.put("authenticationType", "MicrosoftEntraClientSecretCredential");
         connProps.put("poolEnabled", true);
-        System.out.println("Pool Enabled: " + connProps.get("poolEnabled"));
-        // Add timeout configurations
-        if(testConfig.getProperty("redis.connection.timeout") != null) {
+
+        if (testConfig.getProperty("redis.connection.timeout") != null) {
             connProps.put("connectionTimeout", Long.parseLong(testConfig.getProperty("redis.connection.timeout")));
         }
-        if(testConfig.getProperty("redis.socket.timeout") != null) {
+        if (testConfig.getProperty("redis.socket.timeout") != null) {
             connProps.put("socketTimeout", Long.parseLong(testConfig.getProperty("redis.socket.timeout")));
         }
-        
-        if(testConfig.getProperty("redis.pool.size") != null && !testConfig.getProperty("redis.pool.size").isEmpty()) {
-            System.out.println("Using pool size: " + testConfig.getProperty("redis.pool.size"));
+        if (testConfig.getProperty("redis.pool.size") != null && !testConfig.getProperty("redis.pool.size").isEmpty()) {
             connProps.put("poolSize", Long.parseLong(testConfig.getProperty("redis.pool.size")));
-        } 
-        
+        }
 
         // Operation properties
         Map<String, Object> opProps = new HashMap<>();
         opProps.put("key_prefix", testConfig.getProperty("redis.cache.name"));
         opProps.put("remove_key_prefix_from_response", Boolean.parseBoolean(testConfig.getProperty("redis.cache.remove.prefix")));
-        opProps.put("wrap_inprofile", Boolean.parseBoolean(testConfig.getProperty("redis.wrap.inprofile")));
         opProps.put("throw_exception", Boolean.parseBoolean(testConfig.getProperty("redis.throw.exception")));
-        opProps.put("set_ttl", Long.parseLong("60000")); 
-        opProps.put("hashing", Boolean.parseBoolean(testConfig.getProperty("redis.hashing")));
+        opProps.put("set_ttl", 60000L);
 
-        // Set up the operation context once for both operations
+        // First, upsert test data into Redis
         tester.setOperationContext(OperationType.UPSERT, connProps, opProps, "Upsert", null);
-        
-        // First, perform an UPSERT operation to put data into Redis
         String upsertPayload = "{\"key\": \"12344\", \"value\": \"Test Value from Upsert Operation\"}";
-        java.util.List<java.io.InputStream> upsertInputs = new java.util.ArrayList<>();
+        List<java.io.InputStream> upsertInputs = new java.util.ArrayList<>();
         upsertInputs.add(new java.io.ByteArrayInputStream(upsertPayload.getBytes()));
         List<SimpleOperationResult> upsertResults = tester.executeUpsertOperation(upsertInputs);
-        System.out.println("Upsert Results: " + upsertResults);
-        //Thread.sleep(60 * 60 * 1000); // Sleep for 1 hour to test token validity
-        
-        // Switch to GET operation context using the same connector instance
+        LOGGER.info("Upsert Results: " + upsertResults);
+        assertNotNull("Upsert results should not be null", upsertResults);
+        assertFalse("Upsert should have at least one result", upsertResults.isEmpty());
+
+        // Then retrieve it
         tester.setOperationContext(OperationType.GET, connProps, opProps, "Get", null);
-
-        List<SimpleOperationResult> actualResults = tester.executeGetOperation("12344");
-        System.out.println("Get Results: " + actualResults);
-    }
-
-    @Test
-    public void testMicrosoftEntraClientSecretCredential() throws IOException {
-        System.out.println("Testing Microsoft Entra Client Secret Credential Start...");
-        loadTestProperties();
-        System.out.println("Testing Microsoft Entra Client Secret Credential...");
-        new MicrosoftEntraClientSecretCredential(
-            testConfig.getProperty("azure.tenant.id"),
-            testConfig.getProperty("azure.client.id"),
-            testConfig.getProperty("azure.client.secret")
-        );
-
+        List<SimpleOperationResult> getResults = tester.executeGetOperation("12344");
+        LOGGER.info("Get Results: " + getResults);
+        assertNotNull("Get results should not be null", getResults);
+        assertFalse("Get should have at least one result", getResults.isEmpty());
     }
 }

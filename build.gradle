@@ -49,15 +49,14 @@ dependencies {
     api group: 'com.boomi.connsdk', name: 'connector-sdk-util', version: sdkBoomiVersion
     implementation group: 'com.boomi.util', name: 'boomi-util', version: sdkBoomiVersion
     
-    implementation group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.14'
     implementation group: 'com.google.code.gson', name: 'gson', version: '2.13.1'
     implementation group: 'org.apache.commons', name: 'commons-pool2', version: '2.12.1'
-    implementation group: 'commons-codec', name: 'commons-codec', version: '1.19.0'
     // Using Jedis 5.2.0 because it supports Redis 6 and above, which includes Azure Cache for Redis
     implementation group: 'redis.clients', name: 'jedis', version: '5.2.0'
-    
+
     testImplementation group: 'com.boomi.connsdk', name: 'connector-sdk-test-util', version: sdkBoomiVersion
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
+    testImplementation group: 'org.mockito', name: 'mockito-core', version: '4.11.0'
 }
 
     test {

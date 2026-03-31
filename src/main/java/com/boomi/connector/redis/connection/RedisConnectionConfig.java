@@ -1,6 +1,7 @@
 package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.api.BrowseContext;
+import com.boomi.connector.api.OAuth2Context;
 import com.boomi.connector.api.PropertyMap;
 import com.boomi.connector.redis.authentication.AuthenticationType;
 import redis.clients.jedis.HostAndPort;
@@ -25,9 +26,7 @@ public class RedisConnectionConfig {
     // Authentication properties
     private final String username;
     private final String password;
-    private final String clientId;
-    private final String clientSecret;
-    private final String tenantId;
+    private final OAuth2Context entraOAuth2Context;
     
     // Pool configuration
     private final int poolSize;
@@ -55,9 +54,7 @@ public class RedisConnectionConfig {
         this.authenticationType = AuthenticationType.fromValue(propertiesMap.getProperty("authenticationType"));
         this.username = propertiesMap.getProperty("user");
         this.password = propertiesMap.getProperty("password");
-        this.clientId = propertiesMap.getProperty("clientId");
-        this.clientSecret = propertiesMap.getProperty("clientSecret");
-        this.tenantId = propertiesMap.getProperty("tenantId");
+        this.entraOAuth2Context = propertiesMap.getOAuth2Context("entraOAuth2");
         
         // Parse pool configuration
         this.poolSize = poolEnabled ? propertiesMap.getLongProperty("poolSize", 4L).intValue() : 0;
@@ -138,9 +135,7 @@ public class RedisConnectionConfig {
     public AuthenticationType getAuthenticationType() { return authenticationType; }
     public String getUsername() { return username; }
     public String getPassword() { return password; }
-    public String getClientId() { return clientId; }
-    public String getClientSecret() { return clientSecret; }
-    public String getTenantId() { return tenantId; }
+    public OAuth2Context getEntraOAuth2Context() { return entraOAuth2Context; }
     public int getPoolSize() { return poolSize; }
     public int getMinPoolSize() { return minPoolSize; }
     public int getMaxIdleTime() { return maxIdleTime; }

@@ -47,29 +47,10 @@
         </visibilityCondition>
     </field>
 
-    <field id="clientId" label="Client ID" type="string">
-        <helpText>Microsoft Entra Client ID</helpText>
-        <defaultValue></defaultValue>
-        <visibilityCondition>
-            <valueCondition fieldId="authenticationType">
-                <value>MicrosoftEntraClientSecretCredential</value>
-            </valueCondition>
-        </visibilityCondition>
-    </field>
-
-    <field id="clientSecret" label="Client Secret" type="password">
-        <helpText>Microsoft Entra Client Secret</helpText>
-        <defaultValue></defaultValue>
-        <visibilityCondition>
-            <valueCondition fieldId="authenticationType">
-                <value>MicrosoftEntraClientSecretCredential</value>
-            </valueCondition>
-        </visibilityCondition>
-    </field>
-
-    <field id="tenantId" label="Tenant ID" type="string">
-        <helpText>Microsoft Entra Tenant ID</helpText>
-        <defaultValue></defaultValue>
+    <field id="entraOAuth2" label="Microsoft Entra OAuth 2.0 Credentials" type="oauth2">
+        <helpText>Select the OAuth 2.0 Connection Component configured for Azure Cache for Redis.
+                  Use grant type: Client Credentials, scope: https://redis.azure.com/.default,
+                  and token URL: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token</helpText>
         <visibilityCondition>
             <valueCondition fieldId="authenticationType">
                 <value>MicrosoftEntraClientSecretCredential</value>

@@ -1,12 +1,18 @@
 package com.boomi.connector.redis.connection;
 
+import com.boomi.connector.api.OAuth2Context;
+import com.boomi.connector.api.OAuth2Token;
 import com.boomi.connector.redis.authentication.AuthenticationType;
-import com.boomi.connector.redis.authentication.MicrosoftEntraClientSecretCredential;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.Connection;
 import redis.clients.jedis.Jedis;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.logging.Logger;
 
 /**
@@ -21,7 +27,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
     protected String username;
     protected String password;
     protected final AuthenticationType authenticationType;
-    protected MicrosoftEntraClientSecretCredential microsoftEntraCredential;
 
     protected BaseRedisConnection(RedisConnectionConfig config) {
         this.config = config;
@@ -40,23 +45,20 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
                 break;
                 
             case MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL:
-                String tenantId = config.getTenantId();
-                String clientId = config.getClientId();
-                String clientSecret = config.getClientSecret();
-                
-                if (tenantId == null || clientId == null || clientSecret == null) {
+                OAuth2Context oauth2Context = config.getEntraOAuth2Context();
+                if (oauth2Context == null) {
                     throw new IllegalArgumentException(
-                        "Microsoft Entra authentication requires tenantId, clientId, and clientSecret"
+                        "Microsoft Entra authentication requires an OAuth 2.0 credential component"
                     );
                 }
-                
-                MicrosoftEntraClientSecretCredential credential = 
-                    new MicrosoftEntraClientSecretCredential(tenantId, clientId, clientSecret);
-                
-                // Store credential for token expiration checking
-                this.microsoftEntraCredential = credential;
-                this.username = credential.getUsername();
-                this.password = credential.getToken();
+                try {
+                    OAuth2Token oauthToken = oauth2Context.getOAuth2Token(false);
+                    String accessToken = oauthToken.getAccessToken();
+                    this.username = extractOidFromToken(accessToken);
+                    this.password = accessToken;
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to obtain Microsoft Entra token", e);
+                }
                 break;
                 
             default:
@@ -185,13 +187,28 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return password;
     }
 
+    /**
+     * Extracts the 'oid' (Object ID) claim from an Azure AD JWT access token.
+     * Azure Cache for Redis requires the OID as the AUTH username.
+     */
+    private static String extractOidFromToken(String token) {
+        String[] parts = token.split("\\.");
+        String base64 = parts[1];
+
+        switch (base64.length() % 4) {
+            case 2: base64 += "=="; break;
+            case 3: base64 += "="; break;
+            default: break;
+        }
+
+        byte[] jsonBytes = Base64.getDecoder().decode(base64);
+        String json = new String(jsonBytes, StandardCharsets.UTF_8);
+        JsonObject jwt = JsonParser.parseString(json).getAsJsonObject();
+        return jwt.get("oid").getAsString();
+    }
+
     @Override
     public boolean isValid() {
-        try {
-            // Default implementation - subclasses can override for specific validation logic
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+        return true;
     }
 }
