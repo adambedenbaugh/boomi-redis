@@ -1,7 +1,8 @@
 package com.boomi.connector.redis.operation;
 
-import java.util.Iterator;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.logging.Logger;
 
 import com.boomi.connector.api.GetRequest;
@@ -11,52 +12,37 @@ import com.boomi.connector.api.OperationResponse;
 import com.boomi.connector.api.OperationStatus;
 import com.boomi.connector.api.ResponseUtil;
 import com.boomi.connector.redis.RedisConnection;
+import com.boomi.connector.redis.util.RedisUtils;
 import com.boomi.connector.util.BaseGetOperation;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 
-/**
- * 
- * @author anthony.rabiaza@gmail.com
- *
- */
 public class RedisGetOperation extends BaseGetOperation {
 
 	private static final String WILDCARD_OBJECT_ID = "*";
 	private static final String SUCCESS_STATUS_CODE = "200";
 	private static final String SUCCESS_MESSAGE = "OK";
 
-	// Configuration class to hold operation properties
-	private class RedisOperationConfig {
-		private final String keyPrefix;
-		private final boolean autoKey;
-		private final boolean throwException;
-		private final boolean wrapInProfile;
-		private final long ttl;
-		private final Logger logger;
-
-		public RedisOperationConfig(OperationContext context, Logger logger) {
-			this.keyPrefix = context.getOperationProperties().getProperty("key_prefix");
-			this.autoKey = context.getOperationProperties().getBooleanProperty("auto_key");
-			this.throwException = context.getOperationProperties().getBooleanProperty("throw_exception");
-			this.wrapInProfile = context.getOperationProperties().getBooleanProperty("wrap_inprofile");
-			this.logger = logger;
-			
-			long ttlValue;
-			try {
-				ttlValue = context.getOperationProperties().getLongProperty("set_ttl");
-			} catch (Exception e) {
-				ttlValue = -1;
-			}
-			this.ttl = ttlValue;
+	private String keyPrefix;
+	private boolean removeKeyPrefixFromResponse;
+	private boolean returnOnlyValue;
+	private boolean throwException;
+	private Logger logger;
+	
+	private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+	
+	// JSON serialization for the response
+	private static class KeyValuePair {
+		@SuppressWarnings("unused")
+		private final String key;
+		@SuppressWarnings("unused")
+		private final String value;
 		
+		public KeyValuePair(String key, String value) {
+			this.key = key;
+			this.value = value;
 		}
-
-		public String getKeyPrefix() { return keyPrefix; }
-		public boolean isAutoKey() { return autoKey; }
-		public boolean isThrowException() { return throwException; }
-		public boolean isWrapInProfile() { return wrapInProfile; }
-		public long getTtl() { return ttl; }
-		public Logger getLogger() { return logger; }
 	}
 
 	public RedisGetOperation(OperationContext context) {
@@ -65,22 +51,26 @@ public class RedisGetOperation extends BaseGetOperation {
 
 	@Override
 	protected void executeGet(GetRequest request, OperationResponse response) {
-		Logger logger = response.getLogger();
-		logger.fine("executeGet");
+		this.logger = response.getLogger();
 
-		RedisOperationConfig config = new RedisOperationConfig(getContext(), logger);
+		this.keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
+		this.removeKeyPrefixFromResponse = getContext().getOperationProperties().getBooleanProperty("remove_key_prefix_from_response", true);
+		this.returnOnlyValue = getContext().getOperationProperties().getBooleanProperty("return_only_value", false);
+		this.throwException = getContext().getOperationProperties().getBooleanProperty("throw_exception");
+
+		// RedisOperationConfig config = new RedisOperationConfig(getContext(), logger);
 		ObjectIdData input = request.getObjectId();
 
 		try {
 			String objectId = input.getObjectId();
-			logger.fine("ID: " + objectId);
 
 			RedisConnection redisConnection = new RedisConnection(getContext());
+			redisConnection.init();
 
 			if (!WILDCARD_OBJECT_ID.equals(objectId)) {
-				handleSingleGet(objectId, config, redisConnection, response, input);
+				handleSingleGet(objectId, redisConnection, response, input);
 			} else {
-				handleGetAll(config, redisConnection, response, input);
+				handleGetAll(redisConnection, response, input);
 			}
 
 		} catch (Exception e) {
@@ -88,73 +78,67 @@ public class RedisGetOperation extends BaseGetOperation {
 		}
 	}
 
-	private void handleSingleGet(String objectId, RedisOperationConfig config, 
+	private void handleSingleGet(String objectId,
 	                           RedisConnection connection, OperationResponse response, 
 	                           ObjectIdData input) {
-		String cachedValue = get(connection, config.getKeyPrefix(), objectId, config.getTtl());
+		String combinedKey = keyPrefix + objectId;
+		logger.fine("Key: " + combinedKey);
+		String cachedValue = connection.get(combinedKey);			
 
-		if (config.isThrowException() && cachedValue == null) {
-			ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
+		if (throwException && cachedValue == null) {
+			ResponseUtil.addExceptionFailure(response, input, new Exception("Key not found."));
 			return;
 		}
 
-		config.getLogger().fine("CacheValue received:" + cachedValue);
-
 		if (cachedValue != null) {
-			config.getLogger().fine("Cache Hit");
-			if (config.isWrapInProfile()) {
-				response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
-					ResponseUtil.toPayload("<Get><ID>" + objectId + "</ID><Value>" + cachedValue + "</Value></Get>"));
-			} else {
+			if (returnOnlyValue) {
 				response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
 					ResponseUtil.toPayload(cachedValue));
-			}
+			} else {
+				List<KeyValuePair> keyValueList = new ArrayList<>();
+				if (removeKeyPrefixFromResponse) {
+					String keyWithoutPrefix = RedisUtils.removePrefix(combinedKey, keyPrefix);
+					keyValueList.add(new KeyValuePair(keyWithoutPrefix, cachedValue));
+				} else {
+					keyValueList.add(new KeyValuePair(combinedKey, cachedValue));
+				}
+				String jsonResponse = gson.toJson(keyValueList);
+				response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
+					ResponseUtil.toPayload(jsonResponse));
+				}
 		} else {
-			config.getLogger().fine("Cache Empty");
+			logger.fine("Key not found.");
 			response.addEmptyResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE);
 		}
 	}
 
-	private void handleGetAll(RedisOperationConfig config, RedisConnection connection, 
+	private void handleGetAll(RedisConnection connection, 
 	                        OperationResponse response, ObjectIdData input) {
-		Map<String, String> cachedValue = get(connection, config.getKeyPrefix(), config.getTtl());
+		logger.fine("Get all keys with prefix: " + keyPrefix);
+		Map<String, String> cachedValue = connection.getAll(keyPrefix);
 		
-		if (config.isThrowException() && cachedValue == null) {
+		if (throwException && cachedValue == null) {
 			ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
 			return;
 		}
 
-		config.getLogger().fine("CacheValue received: " + cachedValue);
-
 		if (cachedValue != null) {
-			config.getLogger().fine("Cache Hit");
-			for (Iterator<String> iterator = cachedValue.keySet().iterator(); iterator.hasNext();) {
-				String key = iterator.next();
-				String value = cachedValue.get(key);
-
-				if (config.isWrapInProfile()) {
-					response.addPartialResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
-						ResponseUtil.toPayload("<Get><ID>" + key + "</ID><Value>" + value + "</Value></Get>"));
+			List<KeyValuePair> keyValueList = new ArrayList<>();
+			for (Map.Entry<String, String> entry : cachedValue.entrySet()) {
+				if(removeKeyPrefixFromResponse){
+					String fullKey = entry.getKey();
+					String keyWithoutPrefix = RedisUtils.removePrefix(fullKey, keyPrefix);
+				    keyValueList.add(new KeyValuePair(keyWithoutPrefix, entry.getValue()));
 				} else {
-					response.addPartialResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
-						ResponseUtil.toPayload(value));
+				    keyValueList.add(new KeyValuePair(entry.getKey(), entry.getValue()));
 				}
 			}
-			
-			response.finishPartialResult(input);
+			String jsonResponse = gson.toJson(keyValueList);
+			response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
+				ResponseUtil.toPayload(jsonResponse));
 		} else {
-			config.getLogger().fine("Cache Empty");
 			response.addEmptyResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE);
 		}
 	}
 
-	// Convenience methods for the connector operations
-	public Map<String, String> get(RedisConnection redisConnection, String keyPrefix, Long ttl) {
-		return redisConnection.getAll(keyPrefix, ttl);
-	}
-	
-	public String get(RedisConnection redisConnection, String keyPrefix, String key, Long ttl) {
-		String combinedKey = keyPrefix + ":" + key;
-		return redisConnection.getValue(combinedKey, ttl);
-	}
 }

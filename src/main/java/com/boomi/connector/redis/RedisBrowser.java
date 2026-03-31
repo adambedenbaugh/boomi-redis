@@ -2,10 +2,7 @@ package com.boomi.connector.redis;
 
 import java.net.URL;
 import java.util.Collection;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
+import java.util.logging.Logger;
 
 import com.boomi.connector.api.ConnectorException;
 import com.boomi.connector.api.ObjectDefinition;
@@ -13,39 +10,39 @@ import com.boomi.connector.api.ObjectDefinitionRole;
 import com.boomi.connector.api.ObjectDefinitions;
 import com.boomi.connector.api.ObjectType;
 import com.boomi.connector.api.ObjectTypes;
-import com.boomi.connector.redis.util.RedisUtils;
+import com.boomi.connector.api.ContentType;
 import com.boomi.connector.util.BaseBrowser;
 
-/**
- * 
- * @author anthony.rabiaza@gmail.com
- *
- */
+
 public class RedisBrowser extends BaseBrowser {
 
-	private static final String TYPE_ELEMENT = "type";
-
+	static Logger logger = Logger.getLogger(RedisBrowser.class.getName());
 	protected RedisBrowser(RedisConnection conn) {
 		super(conn);
 	}
 
 	@Override
 	public ObjectTypes getObjectTypes() {
-		try {
-			URL url = this.getClass().getClassLoader().getResource("metadata.xml");
-			Document typeDoc = RedisUtils.parse(url.openStream());
-			NodeList typeList = typeDoc.getElementsByTagName(TYPE_ELEMENT);
-			ObjectTypes types = new ObjectTypes();
-			for (int i = 0; i < typeList.getLength(); ++i) {
-				Element typeEl = (Element) typeList.item(i);
-				String typeName = typeEl.getTextContent().trim();
-				ObjectType type = new ObjectType();
-				type.setId(typeName);
-				types.getTypes().add(type);
-			}
-			return types;
-		} catch (Exception e) {
-			throw new ConnectorException(e);
+		ObjectTypes types = new ObjectTypes();
+		ObjectType objectType = new ObjectType();
+		switch (this.getContext().getOperationType()) {
+			case GET:
+				objectType.withId("Get")
+					.withLabel("Get");
+				return types.withTypes(objectType);
+
+			case UPSERT:
+				objectType.withId("Upsert")
+					.withLabel("Upsert");
+				return types.withTypes(objectType);
+
+			case DELETE:
+				objectType.withId("Delete")
+					.withLabel("Delete");
+				return types.withTypes(objectType);
+				
+			default:
+				throw new UnsupportedOperationException();
 		}
 	}
 
@@ -53,15 +50,33 @@ public class RedisBrowser extends BaseBrowser {
 	public ObjectDefinitions getObjectDefinitions(String objectTypeId,
 			Collection<ObjectDefinitionRole> roles) {
 		try {
-			URL url = this.getClass().getClassLoader().getResource(objectTypeId.toLowerCase() + ".xsd");
-            Document defDoc = RedisUtils.parse(url.openStream());
-            ObjectDefinitions defs = new ObjectDefinitions();
-            ObjectDefinition def = new ObjectDefinition();
-            def.setSchema(defDoc.getDocumentElement());
-            def.setElementName(objectTypeId);
-            defs.getDefinitions().add(def);
-
-            return defs;
+			URL url = this.getClass().getClassLoader().getResource("schemas/" + objectTypeId.toLowerCase() + ".schema.json");
+			if (url == null) {
+				throw new ConnectorException("Schema file not found: schemas/" + objectTypeId.toLowerCase() + ".schema.json");
+			}
+			
+			// Read the JSON schema file as a string. The JSON schemas are stored in src/main/resources/schemas
+			java.io.InputStream inputStream = url.openStream();
+			java.util.Scanner scanner = null;
+			String jsonSchemaContent = "";
+			try {
+				scanner = new java.util.Scanner(inputStream, "UTF-8").useDelimiter("\\A");
+				jsonSchemaContent = scanner.hasNext() ? scanner.next() : "";
+			} finally {
+				if (scanner != null) {
+					scanner.close();
+				}
+				inputStream.close();
+			}
+			
+			ObjectDefinition def = new ObjectDefinition();
+			def.setElementName("");
+			def.setJsonSchema(jsonSchemaContent);  // Set as string, not Document
+			def.setOutputType(ContentType.JSON);
+			def.setInputType(ContentType.JSON);
+        	ObjectDefinitions defs = new ObjectDefinitions();
+        	defs.getDefinitions().add(def);
+			return defs;
 
         }
         catch (Exception e) {
@@ -72,10 +87,5 @@ public class RedisBrowser extends BaseBrowser {
 	@Override
 	public RedisConnection getConnection() {
 		return (RedisConnection) super.getConnection();
-	}
-
-	public static void main(String[] args) {
-		ObjectTypes o = new RedisBrowser(null).getObjectTypes();
-		System.out.println(o);
 	}
 }

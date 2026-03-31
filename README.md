@@ -124,5 +124,36 @@ Pooling need to be disable to make the Redis connector working on the Boomi Publ
 
 
 
+## Installation
+1. Navigate to [boomi-redis releases](https://github.com/adambedenbaugh/boomi-redis/releases) and download the latest .zip file and connector-description.xml file.
+2. Import into Boomi by navigating to Settings -> Develper.
+3. Upload the .zip file and connector-descpition.xml file.
+4. Update the connector icon with Postman collection on initial install. 
 
-Fork of [BoomiCacheConnector](https://bitbucket.org/officialboomi/boomicacheconnector/src/master/).
+
+## Updating Custom Connector Icon
+
+The icon for the custom connector can be updated with the [ConnectorIcon API](https://developer.boomi.com/docs/api/connectors/ConnectorIcon#tag/Connector-Icon/operation/CreateConnectorIcon).
+
+1. Open the `assets/postman/boomi_redis_connector.postman_collection.json` file within Postman.
+2. Within the imported collection, update the Basic Username and Password within the Authorization tab. The username should begin with `BOOMI_TOKEN.`.
+![](assets/postman-auth.png)
+3. Navigate to the Variables tab and update `classificationType` and `baseUrlConnector`. Values to be set are below. 
+    - `classificationType`: classificationType is the value of the Type column of the Boomi Enterprise Platform > Developer tab > Connectors table. Example: `accountID-sample-uat`.
+    - `baseUrlConnector`: `https://api.boomi.com/connector/api/rest/v1/{account-id}` Update the account-id with the Boomi Account Id. 
+    ![](assets/postman-variables.png)
+4. Under the request's body add `postman/redis.svg` to the `connectorIcon` value.
+![](assets/postman-body.png)
+5. Click Send on the Request.
+6. Clear the browser cache each time the above request is executed to view the new icon. 
+
+
+
+## TODO
+
+- Add connection timeouts
+- Enabled pooling
+
+
+
+This repo is a fork of [BoomiCacheConnector](https://bitbucket.org/officialboomi/boomicacheconnector/src/master/).

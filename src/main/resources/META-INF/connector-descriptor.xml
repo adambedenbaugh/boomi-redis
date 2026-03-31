@@ -94,6 +94,16 @@
         </visibilityCondition>
     </field>
 
+    <field id="connectionTimeout" label="Connection Timeout (seconds)" type="integer">
+        <helpText>Maximum time to wait for connection establishment. For Azure Redis with SSL/Auth, recommended minimum is 30 seconds.</helpText>
+        <defaultValue>30</defaultValue>
+    </field>
+
+    <field id="socketTimeout" label="Socket Read Timeout (seconds)" type="integer">
+        <helpText>Maximum time to wait for read operations. For Azure Redis with SSL/Auth, recommended minimum is 30 seconds.</helpText>
+        <defaultValue>30</defaultValue>
+    </field>
+
     <field id="poolEnabled" label="Enable Connection Pooling" type="boolean">
         <helpText>Select to enable connection pooling and make other fields active. Connection pooling may increase performance by using resources more efficiently. Connection pools are per JVM.</helpText>
         <defaultValue>false</defaultValue>
@@ -108,7 +118,7 @@
             </valueCondition>
         </visibilityCondition>
     </field>
-    <!-- <field id="minPoolSize" label="Minimum Connections" type="integer">
+    <field id="minPoolSize" label="Minimum Connections" type="integer">
         <helpText>Minimum pool size.</helpText>
         <defaultValue>1</defaultValue>
         <visibilityCondition>
@@ -134,21 +144,25 @@
                 <value>true</value>
             </valueCondition>
         </visibilityCondition>
-    </field> -->
+    </field>
 	
 	<operation types="GET" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
-	        <helpText>Prefix added to all key values.</helpText>
+	        <helpText>Prefix added to all key values. Include a colon (:) at the end.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
-		<field id="auto_key" label="Automatic Key Computation" type="boolean">
+        <field id="remove_key_prefix_from_response" label="Remove Key Prefix from Response" type="boolean">
+	        <helpText>Select to remove the key prefix from the response key(s).</helpText>
+	        <defaultValue>true</defaultValue>
+	    </field>
+        <!-- <field id="return_only_value" label="Return Only Value in Response" type="boolean">
+            <helpText>Do not return JSON response. Return only the value from the response. Not applicable for wildcard requests.</helpText>
+            <defaultValue>false</defaultValue>
+        </field> -->
+		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
             <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
             <defaultValue>false</defaultValue>
-        </field>
-        <field id="wrap_inprofile" label="Return XML Response" type="boolean">
-            <helpText>Wrap ID and Value element from Cache in a XML object</helpText>
-            <defaultValue>true</defaultValue>
-        </field>
+        </field> -->
         <field id="throw_exception" label="Throw Exception when not found" type="boolean">
             <helpText>Throw Exception when no result if found in the Cache. You will have to Catch the Exception and query the Backend System</helpText>
             <defaultValue>false</defaultValue>
@@ -164,10 +178,10 @@
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
-		<field id="auto_key" label="Automatic Key Computation" type="boolean">
+		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
             <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
             <defaultValue>false</defaultValue>
-        </field>
+        </field> -->
         <field id="set_ttl" label="Set Time To Live (TTL)" type="integer" overrideable="true">
             <helpText>Set the time to live (TTL) in milliseconds. Set to -1 to disable a change to TTL.</helpText>
             <defaultValue>-1</defaultValue>
@@ -179,10 +193,10 @@
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
-		<field id="auto_key" label="Automatic Key Computation" type="boolean">
+		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
             <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
             <defaultValue>false</defaultValue>
-        </field>
+        </field> -->
 	</operation>
 
     <!-- TODO: Add TTL document property -->

@@ -1,0 +1,81 @@
+{
+	"info": {
+		"name": "Boomi Redis Connector",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"	},
+	"item": [
+		{
+			"name": "Create a new connector icon",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "connectorIcon",
+							"type": "file",
+							"src": []
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrlConnector}}/ConnectorIcon/{{classificationType}}/upload",
+					"host": [
+						"{{baseUrlConnector}}"
+					],
+					"path": [
+						"ConnectorIcon",
+						"{{classificationType}}",
+						"upload"
+					]
+				},
+				"description": "Use this operation to upload a new connector icon to an existing connector type. Creating an icon using this API will update the existing connector icon to this new icon to the connector type provided as one of the input data. The request format is multipart and the following data inputs are all of the parts we require for the request: \n - `classificationType`: Existing connector classification type \n -   `connectorIcon` : The connector icon .svg file. \n -   `sha256Checksum` : (Optional) Text field to provide a `sha256Checksum` to validate the integrity of the uploaded file."
+			},
+			"response": []
+		}
+	],
+	"auth": {
+		"type": "basic",
+		"basic": [
+			{
+				"key": "username",
+				"value": "BOOMI_TOKEN.{username}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "classificationType",
+			"value": ""
+		},
+		{
+			"key": "baseUrlConnector",
+			"value": ""
+		}
+	]
+}

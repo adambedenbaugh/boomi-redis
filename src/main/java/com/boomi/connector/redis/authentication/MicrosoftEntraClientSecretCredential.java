@@ -3,6 +3,7 @@ package com.boomi.connector.redis.authentication;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.logging.Logger;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -15,9 +16,12 @@ import org.apache.http.entity.StringEntity;
 
 
 public class MicrosoftEntraClientSecretCredential {
+    
+    private static final Logger logger = Logger.getLogger(MicrosoftEntraClientSecretCredential.class.getName());
 
     private String token;
     private String username;
+    private long expiresAtMillis;
 
     /**
      * Constructs a Microsoft Entra Client Secret Credential.
@@ -41,10 +45,10 @@ public class MicrosoftEntraClientSecretCredential {
 
             try (CloseableHttpResponse response = httpClient.execute(post)) {
                 int statusCode = response.getStatusLine().getStatusCode();
-                System.out.println("Response Status Code: " + statusCode);
+                logger.info("Response Status Code: " + statusCode);
                 
                 if (statusCode != 200) {
-                    throw new IOException("Failed to obtain token, status code: " + statusCode);
+                    throw new IOException("Failed to obtain token. Status code: " + statusCode + ". Response: " + EntityUtils.toString(response.getEntity()));
                 }
                 
                 if (response.getEntity() != null) {
@@ -67,6 +71,14 @@ public class MicrosoftEntraClientSecretCredential {
         if (username == null || username.isEmpty()) {
             throw new IllegalArgumentException("Failed to extract username from token.");
         }
+        
+        // Extract expires_in and convert to expiration time in milliseconds
+        if (jsonResponse.has("expires_in")) {
+            int expiresInSeconds = jsonResponse.get("expires_in").getAsInt();
+            expiresAtMillis = System.currentTimeMillis() + (expiresInSeconds * 1000L);
+        } else {
+            throw new IllegalArgumentException("Token response does not contain expires_in field.");
+        }
     }
 
 
@@ -80,12 +92,21 @@ public class MicrosoftEntraClientSecretCredential {
     }
     
     /**
-     * Gets the username extracted from the token.
+     * Gets the username extracted from the token. By extracting the 'oid' claim the username does not need to be supplied. 
      *
      * @return The username.
      */
     public String getUsername() {
         return username;
+    }
+    
+    /**
+     * Gets the expiration time of the token in milliseconds since epoch.
+     *
+     * @return The expiration time in milliseconds.
+     */
+    public long getExpiresAtMillis() {
+        return expiresAtMillis;
     }
 
 

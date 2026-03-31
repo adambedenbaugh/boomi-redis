@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Redis Get Response",
+  "description": "Array of key-value pair objects",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "The key identifier"
+      },
+      "value": {
+        "type": "string",
+        "description": "The value associated with the key"
+      }
+    },
+    "required": ["key", "value"],
+    "additionalProperties": false
+  },
+  "minItems": 0
+}

@@ -16,10 +16,6 @@ public enum AuthenticationType {
         this.value = value;
     }
     
-    /**
-     * Gets the string value used in configuration
-     * @return the configuration string value
-     */
     public String getValue() {
         return value;
     }

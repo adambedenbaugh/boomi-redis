@@ -65,7 +65,13 @@ dependencies {
         testLogging {
             showStandardStreams = true
             events "passed", "skipped", "failed"
+            exceptionFormat "full"
+            showExceptions true
+            showCauses true
+            showStackTraces true
         }
+        // Disable VisualVM for tests
+        jvmArgs = []
     }
 
     jar {
@@ -80,6 +86,7 @@ dependencies {
             from configurations.runtimeClasspath
             from 'lib' 
         }
+        
     }    
 
     task copyUploadArtifacts(type: Copy) {
@@ -89,6 +96,7 @@ dependencies {
             include "connector-descriptor.xml"
             include "connector-config.xml"
         }
+        //from fileTree("src/main/resources/schemas").files
     }
 
     task runEntraAuthTest(type: JavaExec) {
@@ -97,6 +105,11 @@ dependencies {
         classpath = sourceSets.test.runtimeClasspath
         mainClass = 'com.boomi.connector.redis.CacheConnectorEntraAuthGetTest'
         dependsOn compileTestJava
+        
+        // Enable debugging when --debug-jvm flag is used
+        if (project.hasProperty('debug')) {
+            debug = true
+        }
     }
 
     build.dependsOn copyUploadArtifacts    

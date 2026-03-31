@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Redis Delete Request",
+  "description": "Key identifier for delete operation",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "The key identifier to delete"
+    }
+  },
+  "required": ["key"],
+  "additionalProperties": false
+}

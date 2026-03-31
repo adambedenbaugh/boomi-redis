@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Redis Upsert Request",
+  "description": "Key-value pair object for upsert operation",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "The key identifier"
+    },
+    "value": {
+      "type": "string",
+      "description": "The value to store for the key"
+    }
+  },
+  "required": ["key", "value"],
+  "additionalProperties": false
+}

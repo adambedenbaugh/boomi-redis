@@ -28,6 +28,9 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 import com.boomi.util.IOUtil;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 public class RedisUtils {
 
@@ -99,6 +102,41 @@ public class RedisUtils {
 		}
 	}
 
+/**
+* Removes the prefix from a key
+*/
+	public static String removePrefix(String key, String prefix) {
+		if (key != null && prefix != null && key.startsWith(prefix)) {
+			return key.substring(prefix.length());
+		}
+		return key;
+	}
+
+	/**
+	 * Parse JSON string and return JsonObject
+	 * @param jsonString
+	 * @return JsonObject
+	 * @throws Exception
+	 */
+	public static JsonObject parseJson(String jsonString) throws Exception {
+		JsonElement element = JsonParser.parseString(jsonString);
+		return element.getAsJsonObject();
+	}
+
+	/**
+	 * Get string value from JSON object by key
+	 * @param jsonObject
+	 * @param key
+	 * @return string value or null if not found
+	 * @throws Exception
+	 */
+	public static String getJsonStringValue(JsonObject jsonObject, String key) throws Exception {
+		JsonElement element = jsonObject.get(key);
+		if (element != null && !element.isJsonNull()) {
+			return element.getAsString();
+		}
+		return null;
+	}
 
 
 }

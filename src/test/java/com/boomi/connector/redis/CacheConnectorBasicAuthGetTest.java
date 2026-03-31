@@ -9,8 +9,9 @@ import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.junit.Test;
+
 import com.boomi.connector.api.OperationType;
-import com.boomi.connector.redis.RedisConnector;
 import com.boomi.connector.testutil.ConnectorTester;
 import com.boomi.connector.testutil.SimpleOperationResult;
 
@@ -28,6 +29,7 @@ public class CacheConnectorBasicAuthGetTest {
         }
     }
 
+    @Test
     public void testGetOperation() throws Exception {
         // Configure logging to show all levels
         Logger rootLogger = Logger.getLogger("");
@@ -68,13 +70,4 @@ public class CacheConnectorBasicAuthGetTest {
         List<SimpleOperationResult> actualResults = tester.executeGetOperation("boomi");
         LOGGER.info("Actual Results: " + actualResults);
     }
-
-    public static void main(String[] args) {
-		try {
-			new CacheConnectorBasicAuthGetTest().testGetOperation();
-            System.out.println("Test completed successfully.");
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
 }
