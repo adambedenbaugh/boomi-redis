@@ -2,24 +2,7 @@
 <GenericConnectorDescriptor
 	onPremiseBrowseOnly="true" browsingType="onpremise" requireConnectionForBrowse="false">
 	<description>Redis Connector</description>
-	
-    <!-- <field id="type" label="Cache Type" type="string">
-        <helpText>If not using default Cache, please provide an implementation Class</helpText>
-        <defaultValue>Azure Cache for Redis</defaultValue>
-        <allowedValue label="Azure Cache for Redis">        	
-        	<value>com.boomi.proserv.caching.impl.CacheRedis</value>
-       	</allowedValue>
-        <allowedValue label="EHCache">
-        	<value>com.boomi.proserv.caching.impl.CacheEHCache</value>
-		</allowedValue>
-		<allowedValue label="Redis (Standalone or Clustered)">        	
-        	<value>com.boomi.proserv.caching.impl.CacheRedis</value>
-       	</allowedValue>
-       	<allowedValue label="Memcached">        	
-        	<value>com.boomi.proserv.caching.impl.CacheMemcached</value>
-       	</allowedValue>
-    </field> -->
-    
+
     <field id="hosts" label="Hosts" type="string">
         <helpText>For Redis Standalone, please provide the host and port separate with a semi-colon. For Redis Clustered, please provide the list of the hosts with a comma to separate them. For instance: host1:port1,host2:port2</helpText>
         <defaultValue>localhost:6379</defaultValue>
@@ -29,9 +12,9 @@
         <helpText>Default non-SSL port is 6379. Default SSL port is 6380.</helpText>
         <defaultValue>false</defaultValue>
     </field>
-    
+
     <field id="authenticationType" label="Authentication Type" type="string" displayType="list">
-        <helpText>Provide the authentication type. Select Microsoft Entra Client Secret Credential for Azuru Cache for Redis.</helpText>
+        <helpText>Provide the authentication type. Select Microsoft Entra Client Secret Credential for Azure Cache for Redis.</helpText>
         <defaultValue>None</defaultValue>
         <allowedValue label="None">
             <value>None</value>
@@ -53,7 +36,7 @@
             </valueCondition>
         </visibilityCondition>
     </field>
-    
+
     <field id="password" label="Password" type="password">
         <helpText>For Redis, you can provide a password (Access Key for Azure Redis Caches)</helpText>
         <defaultValue></defaultValue>
@@ -61,7 +44,7 @@
             <valueCondition fieldId="authenticationType">
                 <value>Basic</value>
             </valueCondition>
-        </visibilityCondition>        
+        </visibilityCondition>
     </field>
 
     <field id="clientId" label="Client ID" type="string">
@@ -73,7 +56,7 @@
             </valueCondition>
         </visibilityCondition>
     </field>
-    
+
     <field id="clientSecret" label="Client Secret" type="password">
         <helpText>Microsoft Entra Client Secret</helpText>
         <defaultValue></defaultValue>
@@ -145,7 +128,7 @@
             </valueCondition>
         </visibilityCondition>
     </field>
-	
+
 	<operation types="GET" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values. Include a colon (:) at the end.</helpText>
@@ -155,51 +138,28 @@
 	        <helpText>Select to remove the key prefix from the response key(s).</helpText>
 	        <defaultValue>true</defaultValue>
 	    </field>
-        <!-- <field id="return_only_value" label="Return Only Value in Response" type="boolean">
-            <helpText>Do not return JSON response. Return only the value from the response. Not applicable for wildcard requests.</helpText>
-            <defaultValue>false</defaultValue>
-        </field> -->
-		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
-            <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
-            <defaultValue>false</defaultValue>
-        </field> -->
         <field id="throw_exception" label="Throw Exception when not found" type="boolean">
             <helpText>Throw Exception when no result if found in the Cache. You will have to Catch the Exception and query the Backend System</helpText>
             <defaultValue>false</defaultValue>
         </field>
-        <!-- <field id="set_ttl" label="Set Time To Live (TTL)" type="integer">
-            <helpText>Set the time to live (TTL) to some number of milliseconds for every record returned. Set this to -1 to disable a change to TTL. (Redis only)</helpText>
-            <defaultValue>-1</defaultValue>
-        </field> -->
 	</operation>
-	
+
 	<operation types="UPSERT" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
-		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
-            <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
-            <defaultValue>false</defaultValue>
-        </field> -->
         <field id="set_ttl" label="Set Time To Live (TTL)" type="integer" overrideable="true">
             <helpText>Set the time to live (TTL) in milliseconds. Set to -1 to disable a change to TTL.</helpText>
             <defaultValue>-1</defaultValue>
         </field>
 	</operation>
-	
+
 	<operation types="DELETE" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
 	    </field>
-		<!-- <field id="auto_key" label="Automatic Key Computation" type="boolean">
-            <helpText>Enable Automatic Key Computation (for RESTFul APIs), please uncheck for non-API Processes</helpText>
-            <defaultValue>false</defaultValue>
-        </field> -->
 	</operation>
-
-    <!-- TODO: Add TTL document property -->
-    <!-- <dynamicProperty type="string" id="ttl" label="Time To Live (TTL)" /> -->
 
 </GenericConnectorDescriptor>

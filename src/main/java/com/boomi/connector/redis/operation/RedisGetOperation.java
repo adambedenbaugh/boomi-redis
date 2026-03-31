@@ -26,7 +26,6 @@ public class RedisGetOperation extends BaseGetOperation {
 
 	private String keyPrefix;
 	private boolean removeKeyPrefixFromResponse;
-	private boolean returnOnlyValue;
 	private boolean throwException;
 	private Logger logger;
 	
@@ -55,7 +54,6 @@ public class RedisGetOperation extends BaseGetOperation {
 
 		this.keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
 		this.removeKeyPrefixFromResponse = getContext().getOperationProperties().getBooleanProperty("remove_key_prefix_from_response", true);
-		this.returnOnlyValue = getContext().getOperationProperties().getBooleanProperty("return_only_value", false);
 		this.throwException = getContext().getOperationProperties().getBooleanProperty("throw_exception");
 
 		// RedisOperationConfig config = new RedisOperationConfig(getContext(), logger);
@@ -91,21 +89,16 @@ public class RedisGetOperation extends BaseGetOperation {
 		}
 
 		if (cachedValue != null) {
-			if (returnOnlyValue) {
-				response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
-					ResponseUtil.toPayload(cachedValue));
+			List<KeyValuePair> keyValueList = new ArrayList<>();
+			if (removeKeyPrefixFromResponse) {
+				String keyWithoutPrefix = RedisUtils.removePrefix(combinedKey, keyPrefix);
+				keyValueList.add(new KeyValuePair(keyWithoutPrefix, cachedValue));
 			} else {
-				List<KeyValuePair> keyValueList = new ArrayList<>();
-				if (removeKeyPrefixFromResponse) {
-					String keyWithoutPrefix = RedisUtils.removePrefix(combinedKey, keyPrefix);
-					keyValueList.add(new KeyValuePair(keyWithoutPrefix, cachedValue));
-				} else {
-					keyValueList.add(new KeyValuePair(combinedKey, cachedValue));
-				}
-				String jsonResponse = gson.toJson(keyValueList);
-				response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
-					ResponseUtil.toPayload(jsonResponse));
-				}
+				keyValueList.add(new KeyValuePair(combinedKey, cachedValue));
+			}
+			String jsonResponse = gson.toJson(keyValueList);
+			response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE,
+				ResponseUtil.toPayload(jsonResponse));
 		} else {
 			logger.fine("Key not found.");
 			response.addEmptyResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE);

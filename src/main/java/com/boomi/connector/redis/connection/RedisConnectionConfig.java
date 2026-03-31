@@ -60,7 +60,7 @@ public class RedisConnectionConfig {
         this.tenantId = propertiesMap.getProperty("tenantId");
         
         // Parse pool configuration
-        this.poolSize = poolEnabled ? 1 : 0; // Default pool size
+        this.poolSize = poolEnabled ? propertiesMap.getLongProperty("poolSize", 4L).intValue() : 0;
         this.minPoolSize = propertiesMap.getLongProperty("minPoolSize", 1L).intValue();
         this.maxIdleTime = propertiesMap.getLongProperty("maxIdleTime", 60L).intValue();
         this.maxWaitTime = propertiesMap.getLongProperty("maxWaitTime", 60L).intValue();

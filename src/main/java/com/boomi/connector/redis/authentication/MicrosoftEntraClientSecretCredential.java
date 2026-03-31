@@ -58,7 +58,8 @@ public class MicrosoftEntraClientSecretCredential {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            logger.severe("Failed to obtain Microsoft Entra token: " + e.getMessage());
+            throw new RuntimeException("Failed to obtain Microsoft Entra token", e);
         }
 
         JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();

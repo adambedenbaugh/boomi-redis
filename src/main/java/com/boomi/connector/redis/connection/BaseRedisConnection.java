@@ -22,10 +22,7 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
     protected String password;
     protected final AuthenticationType authenticationType;
     protected MicrosoftEntraClientSecretCredential microsoftEntraCredential;
-    
-    // Token expiration buffer in milliseconds (5 minutes before actual expiration)
-    protected static final long TOKEN_EXPIRATION_BUFFER_MS = 5 * 60 * 1000;
-    
+
     protected BaseRedisConnection(RedisConnectionConfig config) {
         this.config = config;
         this.authenticationType = config.getAuthenticationType();
@@ -112,21 +109,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return poolConfig;
     }
     
-    // /**
-    //  * Authenticates a Jedis connection if credentials are required.
-    //  * 
-    //  * @param jedis The Jedis connection to authenticate
-    //  */
-    // protected void authenticateConnection(Jedis jedis) {
-    //     if (requiresAuth()) {
-    //         if (username != null && password != null) {
-    //             jedis.auth(username, password);
-    //         } else if (password != null) {
-    //             jedis.auth(password);
-    //         }
-    //     }
-    // }
-    
     /**
      * Determines if authentication is required based on the type.
      * 
@@ -154,23 +136,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return password;
     }
     
-    // /**
-    //  * Utility method to safely close a Jedis connection.
-    //  * Handles exceptions gracefully to prevent resource leaks.
-    //  * 
-    //  * @param jedis The Jedis connection to close
-    //  */
-    // protected void closeJedisConnection(Jedis jedis) {
-    //     if (jedis != null) {
-    //         try {
-    //             jedis.close();
-    //         } catch (Exception e) {
-    //             logger.warning("Error closing Jedis connection: " + e.getMessage());
-    //             // Log error but don't propagate to avoid masking original exceptions
-    //         }
-    //     }
-    // }
-    
     /**
      * Validates that a pattern is suitable for SCAN operations.
      * Adds wildcards if necessary to ensure proper pattern matching.
@@ -191,67 +156,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return pattern;
     }
     
-    // /**
-    //  * Checks if the Microsoft Entra token is about to expire.
-    //  * @return true if the token expires within the buffer time, false otherwise
-    //  */
-    // protected boolean isTokenAboutToExpire() {
-    //     if (!authenticationType.isMicrosoftEntra() || microsoftEntraCredential == null) {
-    //         return false;
-    //     }
-        
-    //     long currentTime = System.currentTimeMillis();
-    //     long tokenExpirationTime = microsoftEntraCredential.getExpiresAtMillis();
-    //     long timeUntilExpiration = tokenExpirationTime - currentTime;
-        
-    //     boolean aboutToExpire = timeUntilExpiration <= TOKEN_EXPIRATION_BUFFER_MS;
-    //     if (aboutToExpire) {
-    //         logger.info("Microsoft Entra token is about to expire in " + 
-    //                          (timeUntilExpiration / 1000) + " seconds. Refreshing proactively.");
-    //     }
-        
-    //     return aboutToExpire;
-    // }
-
-    // /**
-    //  * Refreshes authentication credentials for Microsoft Entra ID.
-    //  * Updates the internal username and password fields with new token.
-    //  */
-    // protected void refreshEntraAuthentication() {
-    //     if (authenticationType == AuthenticationType.MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL) {
-    //         logger.info("Refreshing Microsoft Entra authentication...");
-    //         try {
-    //             String tenantId = config.getTenantId();
-    //             String clientId = config.getClientId();
-    //             String clientSecret = config.getClientSecret();
-                
-    //             if (tenantId == null || clientId == null || clientSecret == null) {
-    //                 throw new IllegalArgumentException(
-    //                     "Microsoft Entra authentication requires tenantId, clientId, and clientSecret"
-    //                 );
-    //             }
-                
-    //             MicrosoftEntraClientSecretCredential credential = 
-    //                 new MicrosoftEntraClientSecretCredential(tenantId, clientId, clientSecret);
-                    
-    //             // Update stored credential and authentication fields
-    //             this.microsoftEntraCredential = credential;
-    //             this.username = credential.getUsername();
-    //             this.password = credential.getToken();
-    //             logger.info("Microsoft Entra authentication refreshed successfully");
-                
-    //             // Notify subclasses to update their connection pools
-    //             onAuthenticationRefreshed(this.username, this.password);
-                
-    //         } catch (Exception e) {
-    //             logger.severe("Failed to refresh Microsoft Entra authentication: " + e.getMessage());
-    //             throw new RuntimeException("Failed to refresh Microsoft Entra authentication", e);
-    //         }
-    //     }
-    // }
-    
-
-
     /**
      * Tests the connection. Subclasses can override this method if they want to use retry logic.
      * Default implementation returns true (assumes connection is valid).
@@ -261,27 +165,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return true;
     }
 
-    // /**
-    //  * Reinitializes the connection. Subclasses should override this method if they want to use retry logic.
-    //  * Default implementation does nothing.
-    //  */
-    // protected void reinitializeConnection() {
-    //     // Default implementation - subclasses can override if needed
-    //     logger.info("Default reinitializeConnection - no action taken");
-    // }
-
-    // /**
-    //  * Called when authentication credentials are refreshed.
-    //  * Subclasses should override this to update their connection pools.
-    //  * 
-    //  * @param newUsername The new username
-    //  * @param newPassword The new password/token
-    //  */
-    // protected void onAuthenticationRefreshed(String newUsername, String newPassword) {
-    //     // Default implementation - subclasses should override
-    //     logger.info("Authentication refreshed - subclass should handle connection pool update");
-    // }
-    
     /**
      * Gets the current authentication username.
      * Subclasses can override to return updated credentials.

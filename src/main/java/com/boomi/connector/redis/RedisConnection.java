@@ -13,17 +13,15 @@ public class RedisConnection extends BaseConnection<BrowseContext> {
     private static final Logger logger = Logger.getLogger(RedisConnection.class.getName());
 
     private RedisConnectionInterface redisClient;
-    private static boolean initialized = false;
 
     public RedisConnection(BrowseContext context) {
         super(context);
     }
 
     public void init() {
-        if (!initialized) {
+        if (redisClient == null) {
             try {
                 redisClient = RedisConnectionFactory.createConnection(getContext());
-                initialized = true;
                 logger.info("RedisConnection initialized.");
             } catch (Exception e) {
                 throwException(e);
@@ -70,7 +68,6 @@ public class RedisConnection extends BaseConnection<BrowseContext> {
             redisClient.close();
             redisClient = null;
         }
-        initialized = false;
     }
 
     private void throwException(Throwable exception) {
