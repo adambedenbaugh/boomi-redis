@@ -56,11 +56,13 @@ dependencies {
 
     testImplementation group: 'com.boomi.connsdk', name: 'connector-sdk-test-util', version: sdkBoomiVersion
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-    testImplementation group: 'org.mockito', name: 'mockito-core', version: '4.11.0'
+    testImplementation group: 'org.mockito', name: 'mockito-inline', version: '4.11.0'
 }
 
     test {
-        useJUnit()
+        useJUnit {
+            excludeCategories 'com.boomi.connector.redis.IntegrationTest'
+        }
         testLogging {
             showStandardStreams = true
             events "passed", "skipped", "failed"
@@ -69,8 +71,25 @@ dependencies {
             showCauses true
             showStackTraces true
         }
-        // Disable VisualVM for tests
         jvmArgs = []
+    }
+
+    task integrationTest(type: Test) {
+        useJUnit {
+            includeCategories 'com.boomi.connector.redis.IntegrationTest'
+        }
+        testLogging {
+            showStandardStreams = true
+            events "passed", "skipped", "failed"
+            exceptionFormat "full"
+            showExceptions true
+            showCauses true
+            showStackTraces true
+        }
+        description = 'Run integration tests (requires a live Redis or Azure Redis instance)'
+        group = 'verification'
+        classpath = sourceSets.test.runtimeClasspath
+        testClassesDirs = sourceSets.test.output.classesDirs
     }
 
     jar {

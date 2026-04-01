@@ -1,33 +1,65 @@
 package com.boomi.connector.redis.authentication;
 
-/**
- * Simple test to validate AuthenticationType enum functionality
- */
+import org.junit.Test;
+
+import static com.boomi.connector.redis.authentication.AuthenticationType.*;
+import static org.junit.Assert.*;
+
 public class AuthenticationTypeTest {
-    
-    public static void main(String[] args) {
-        System.out.println("Testing AuthenticationType enum...");
-        
-        // Test fromValue method
-        AuthenticationType none = AuthenticationType.fromValue("None");
-        AuthenticationType basic = AuthenticationType.fromValue("Basic");
-        AuthenticationType entra = AuthenticationType.fromValue("MicrosoftEntraClientSecretCredential");
-        
-        System.out.println("NONE: " + none + " - requiresCredentials: " + none.requiresCredentials() + " - isMicrosoftEntra: " + none.isMicrosoftEntra());
-        System.out.println("BASIC: " + basic + " - requiresCredentials: " + basic.requiresCredentials() + " - isMicrosoftEntra: " + basic.isMicrosoftEntra());
-        System.out.println("ENTRA: " + entra + " - requiresCredentials: " + entra.requiresCredentials() + " - isMicrosoftEntra: " + entra.isMicrosoftEntra());
-        
-        // Test invalid value (should default to NONE)
-        AuthenticationType invalid = AuthenticationType.fromValue("Invalid");
-        System.out.println("INVALID: " + invalid + " - requiresCredentials: " + invalid.requiresCredentials() + " (defaults to NONE)");
-        
-        // Test default behavior
-        AuthenticationType defaultType = AuthenticationType.fromValue(null);
-        System.out.println("DEFAULT (null): " + defaultType + " - requiresCredentials: " + defaultType.requiresCredentials());
-        
-        defaultType = AuthenticationType.fromValue("");
-        System.out.println("DEFAULT (empty): " + defaultType + " - requiresCredentials: " + defaultType.requiresCredentials());
-        
-        System.out.println("AuthenticationType enum test completed successfully!");
+
+    @Test
+    public void testFromValueReturnsCorrectTypes() {
+        assertEquals(NONE, fromValue("None"));
+        assertEquals(BASIC, fromValue("Basic"));
+        assertEquals(MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL, fromValue("MicrosoftEntraClientSecretCredential"));
+    }
+
+    @Test
+    public void testFromValueIsCaseInsensitive() {
+        assertEquals(NONE, fromValue("none"));
+        assertEquals(BASIC, fromValue("BASIC"));
+        assertEquals(MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL, fromValue("microsoftentraClientSecretCredential"));
+    }
+
+    @Test
+    public void testFromValueDefaultsToNoneForUnknownInput() {
+        assertEquals(NONE, fromValue("bogus"));
+        assertEquals(NONE, fromValue("OAuth"));
+        assertEquals(NONE, fromValue("token"));
+    }
+
+    @Test
+    public void testFromValueDefaultsToNoneForNullOrEmpty() {
+        assertEquals(NONE, fromValue(null));
+        assertEquals(NONE, fromValue(""));
+        assertEquals(NONE, fromValue("   "));
+    }
+
+    @Test
+    public void testRequiresCredentials() {
+        assertFalse(NONE.requiresCredentials());
+        assertTrue(BASIC.requiresCredentials());
+        assertTrue(MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL.requiresCredentials());
+    }
+
+    @Test
+    public void testIsMicrosoftEntra() {
+        assertFalse(NONE.isMicrosoftEntra());
+        assertFalse(BASIC.isMicrosoftEntra());
+        assertTrue(MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL.isMicrosoftEntra());
+    }
+
+    @Test
+    public void testGetValue() {
+        assertEquals("None", NONE.getValue());
+        assertEquals("Basic", BASIC.getValue());
+        assertEquals("MicrosoftEntraClientSecretCredential", MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL.getValue());
+    }
+
+    @Test
+    public void testToString() {
+        assertEquals("None", NONE.toString());
+        assertEquals("Basic", BASIC.toString());
+        assertEquals("MicrosoftEntraClientSecretCredential", MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL.toString());
     }
 }
