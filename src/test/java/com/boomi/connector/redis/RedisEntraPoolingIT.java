@@ -116,9 +116,8 @@ public class RedisEntraPoolingIT {
         }
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void missingOidClaimFailsWithDescriptiveError() throws Exception {
-        // A JWT with no 'oid' claim must fail loudly (not an NPE) when the connection initializes.
         OAuth2Context ctx = mock(OAuth2Context.class);
         when(ctx.getClientId()).thenReturn("test-client");
         OAuth2Token t = mock(OAuth2Token.class);
@@ -128,6 +127,20 @@ public class RedisEntraPoolingIT {
         when(t.getAccessToken()).thenReturn(noOid);
         when(ctx.getOAuth2Token(false)).thenReturn(t);
         RedisConnection conn = pooledEntraConnection(ctx);
-        conn.get("anything"); // triggers init -> pool -> first connection -> provider.get() -> throws
+        try {
+            conn.get("anything");
+            fail("expected a descriptive failure about the missing oid claim");
+        } catch (RuntimeException e) {
+            boolean mentionsOid = false;
+            for (Throwable cur = e; cur != null; cur = cur.getCause()) {
+                if (cur.getMessage() != null && cur.getMessage().toLowerCase().contains("oid")) {
+                    mentionsOid = true;
+                    break;
+                }
+            }
+            assertTrue("error chain must name the missing 'oid' claim so the user can fix it; got: " + e, mentionsOid);
+        } finally {
+            conn.close();
+        }
     }
 }
