@@ -46,3 +46,9 @@ Thumbs.db
 
 # Ignore Files with Passwords
 src/test/**/*.properties
+
+# Local-only release artifacts (kept on disk, purged from git history)
+/releases/
+
+# Superpowers scratch workspace (subagent ledgers/reports)
+.superpowers/
