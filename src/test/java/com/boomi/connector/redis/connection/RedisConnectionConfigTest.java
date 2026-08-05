@@ -107,4 +107,27 @@ public class RedisConnectionConfigTest {
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhostnoport"));
         config.getHost();
     }
+
+    @Test
+    public void authIdentityNoneWhenNoAuth() {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("None");
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        assertEquals("none", new RedisConnectionConfig(ctx).getAuthIdentity());
+    }
+
+    @Test
+    public void authIdentityUsesClientIdForEntraNotToken() {
+        com.boomi.connector.api.OAuth2Context oauth = mock(com.boomi.connector.api.OAuth2Context.class);
+        when(oauth.getClientId()).thenReturn("client-abc");
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("MicrosoftEntraClientSecretCredential");
+        when(props.getOAuth2Context("entraOAuth2")).thenReturn(oauth);
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        assertEquals("entra:client-abc", new RedisConnectionConfig(ctx).getAuthIdentity());
+    }
 }

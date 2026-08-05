@@ -127,6 +127,22 @@ public class RedisConnectionConfig {
         return nodes;
     }
     
+    /**
+     * Stable identity for pool keying. Deliberately excludes the rotating Entra token so a token
+     * refresh never changes the pool key (which would orphan pools). Uses the OAuth2 client id for
+     * Entra and the username for Basic.
+     */
+    public String getAuthIdentity() {
+        switch (authenticationType) {
+            case BASIC:
+                return "basic:" + username;
+            case MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL:
+                return "entra:" + (entraOAuth2Context == null ? "" : entraOAuth2Context.getClientId());
+            default:
+                return "none";
+        }
+    }
+
     // Getters
     public String getHosts() { return hosts; }
     public boolean isSSLEnabled() { return useSSL; }
