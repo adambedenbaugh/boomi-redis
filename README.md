@@ -118,7 +118,7 @@ Deletes one or all cache entries.
 
 ## Microsoft Entra Authentication (Azure Cache for Redis)
 
-This connector uses **Boomi's native OAuth 2.0 credential management**. The Boomi platform handles token acquisition and refresh automatically — the connector does not call the Azure AD token endpoint directly.
+This connector uses **Boomi's native OAuth 2.0 credential management**. The Boomi platform handles token acquisition and refresh automatically — the connector does not call the Azure AD token endpoint directly. For pooled connections, a fresh token is obtained per new physical connection via a Jedis credentials provider, so token rotation is handled automatically without pool rebuilds.
 
 ### Setup
 

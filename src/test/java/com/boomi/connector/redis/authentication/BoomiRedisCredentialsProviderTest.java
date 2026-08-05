@@ -16,7 +16,7 @@ import static org.mockito.Mockito.*;
 
 public class BoomiRedisCredentialsProviderTest {
 
-    /** Standard-base64, no padding — matches the connector's Base64.getDecoder(). */
+    /** Base64url, no padding — matches the connector's Base64.getUrlDecoder(). */
     private static String jwtWithOid(String oid) {
         Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
         String header = enc.encodeToString("{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));

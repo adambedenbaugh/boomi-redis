@@ -7,7 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 public class FakeJwtTest {
     @Test
-    public void payloadDecodesWithStandardDecoderAndContainsOid() {
+    public void payloadDecodesWithUrlDecoderAndContainsOid() {
         String token = FakeJwt.token("my-oid");
         String payload = token.split("\\.")[1];
         String json = new String(Base64.getUrlDecoder().decode(payload), StandardCharsets.UTF_8);
