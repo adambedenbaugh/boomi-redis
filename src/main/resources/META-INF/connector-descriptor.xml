@@ -47,15 +47,27 @@
         </visibilityCondition>
     </field>
 
-    <field id="entraOAuth2" label="Microsoft Entra OAuth 2.0 Credentials" type="oauth2">
-        <helpText>Select the OAuth 2.0 Connection Component configured for Azure Cache for Redis.
-                  Use grant type: Client Credentials, scope: https://redis.azure.com/.default,
-                  and token URL: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token</helpText>
-        <visibilityCondition>
-            <valueCondition fieldId="authenticationType">
-                <value>MicrosoftEntraClientSecretCredential</value>
-            </valueCondition>
-        </visibilityCondition>
+    <field id="entraOAuth2" label="Microsoft Entra OAuth 2.0 Credentials" type="oauth">
+        <helpText>Used only when Authentication Type is "Microsoft Entra Client Secret Credential" (ignored otherwise).
+                  Configure the Client Credentials grant with your Azure AD App Registration:
+                  scope https://redis.azure.com/.default and token URL
+                  https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token</helpText>
+        <oauth2FieldConfig>
+            <accessTokenEndpoint>
+                <url>
+                    <helpText>Microsoft Entra token endpoint. Default targets Azure Commercial. For Azure Government, change to https://login.microsoftonline.us/{tenantId}/oauth2/v2.0/token. Replace {tenantId} with your Azure tenant ID.</helpText>
+                    <defaultValue>https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token</defaultValue>
+                </url>
+            </accessTokenEndpoint>
+            <scope>
+                <defaultValue>https://redis.azure.com/.default</defaultValue>
+            </scope>
+            <grantType>
+                <allowedValue label="Client Credentials">
+                    <value>client_credentials</value>
+                </allowedValue>
+            </grantType>
+        </oauth2FieldConfig>
     </field>
 
     <field id="connectionTimeout" label="Connection Timeout (seconds)" type="integer">

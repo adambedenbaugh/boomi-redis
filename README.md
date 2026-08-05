@@ -126,10 +126,12 @@ This connector uses **Boomi's native OAuth 2.0 credential management**. The Boom
 2. **Grant it the "Redis Cache Contributor" role** on your Azure Cache for Redis instance.
 3. **Create a Boomi OAuth 2.0 Connection Component** with:
    - Grant type: `Client Credentials`
-   - Token URL: `https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token`
+   - Access Token URL — pre-filled with the Azure **Commercial** default `https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token`. For Azure **Government**, change it to `https://login.microsoftonline.us/{tenantId}/oauth2/v2.0/token`. Replace `{tenantId}` with your Azure tenant ID.
    - Client ID and Client Secret from your App Registration
-   - Scope: `https://redis.azure.com/.default`
+   - Scope — pre-filled with `https://redis.azure.com/.default`
 4. **In the Redis Connector connection**, set Authentication Type to `Microsoft Entra Client Secret Credential` and select the OAuth 2.0 credential component.
+
+> The connector never hardcodes the token endpoint — it uses whatever Access Token URL the OAuth 2.0 component supplies. The connector descriptor pre-fills the Commercial URL and scope as editable defaults; sovereign clouds (Government, China, Germany) work by editing the Access Token URL.
 
 The connector extracts the `oid` (Object ID) claim from the JWT access token to use as the Redis AUTH username, as required by Azure Cache for Redis.
 
