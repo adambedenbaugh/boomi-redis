@@ -119,17 +119,66 @@ public class RedisConnectionConfigTest {
         assertEquals("none", new RedisConnectionConfig(ctx).getAuthIdentity());
     }
 
-    @Test
-    public void authIdentityUsesClientIdForEntraNotToken() {
+    /** Builds an Entra config whose OAuth2Context returns the given client id / secret / token URL. */
+    private static RedisConnectionConfig entraConfig(String clientId, String clientSecret, String accessTokenUrl) {
         com.boomi.connector.api.OAuth2Context oauth = mock(com.boomi.connector.api.OAuth2Context.class);
-        when(oauth.getClientId()).thenReturn("client-abc");
+        when(oauth.getClientId()).thenReturn(clientId);
+        when(oauth.getClientSecret()).thenReturn(clientSecret);
+        when(oauth.getAccessTokenUrl()).thenReturn(accessTokenUrl);
         PropertyMap props = mock(PropertyMap.class);
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn("MicrosoftEntraClientSecretCredential");
         when(props.getOAuth2Context("entraOAuth2")).thenReturn(oauth);
         BrowseContext ctx = mock(BrowseContext.class);
         when(ctx.getConnectionProperties()).thenReturn(props);
-        assertEquals("entra:client-abc", new RedisConnectionConfig(ctx).getAuthIdentity());
+        return new RedisConnectionConfig(ctx);
+    }
+
+    @Test
+    public void authIdentityUsesClientIdForEntra() {
+        String identity = entraConfig("client-abc", "secret", "https://login.microsoftonline.com/t/oauth2/v2.0/token")
+                .getAuthIdentity();
+        assertTrue(identity.startsWith("entra:client-abc:"));
+    }
+
+    @Test
+    public void authIdentityEntraExcludesRotatingToken() {
+        // The identity is derived only from stable config (client id/secret/token URL); the rotating
+        // access token is never part of it, so token refresh cannot change the pool key.
+        String secret = "the-client-secret";
+        String url = "https://login.microsoftonline.com/t/oauth2/v2.0/token";
+        String identity = entraConfig("client-abc", secret, url).getAuthIdentity();
+        assertFalse("identity must not embed the rotating access token", identity.contains("access_token"));
+        // Stable inputs -> stable identity (a second identical config yields the same key).
+        assertEquals(identity, entraConfig("client-abc", secret, url).getAuthIdentity());
+    }
+
+    @Test
+    public void authIdentityEntraDistinguishesClientSecret() {
+        // Fixing a bad client secret must change the pool key so new executions get a fresh pool.
+        String url = "https://login.microsoftonline.com/t/oauth2/v2.0/token";
+        String wrongSecret = entraConfig("client-abc", "wrong-secret-id", url).getAuthIdentity();
+        String rightSecret = entraConfig("client-abc", "correct-secret-value", url).getAuthIdentity();
+        assertNotEquals(wrongSecret, rightSecret);
+    }
+
+    @Test
+    public void authIdentityEntraDistinguishesAccessTokenUrl() {
+        // Switching Azure Commercial -> Government (different token URL) must change the pool key.
+        String commercial = entraConfig("client-abc", "secret",
+                "https://login.microsoftonline.com/t/oauth2/v2.0/token").getAuthIdentity();
+        String government = entraConfig("client-abc", "secret",
+                "https://login.microsoftonline.us/t/oauth2/v2.0/token").getAuthIdentity();
+        assertNotEquals(commercial, government);
+    }
+
+    @Test
+    public void authIdentityEntraDoesNotEmitClientSecretVerbatim() {
+        // The pool key is logged, so the secret must be hashed, never included in plaintext.
+        String secret = "super-secret-value-123";
+        String identity = entraConfig("client-abc", secret,
+                "https://login.microsoftonline.com/t/oauth2/v2.0/token").getAuthIdentity();
+        assertFalse("client secret must not appear verbatim in the pool key", identity.contains(secret));
     }
 
     @Test
