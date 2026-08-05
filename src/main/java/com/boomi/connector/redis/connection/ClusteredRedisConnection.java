@@ -19,37 +19,27 @@ public class ClusteredRedisConnection extends BaseRedisConnection {
     private JedisCluster jedisCluster;
     
     public ClusteredRedisConnection(RedisConnectionConfig config) {
-        super(config);
+        this(config, new DefaultJedisClientFactory());
+    }
+
+    ClusteredRedisConnection(RedisConnectionConfig config, JedisClientFactory clientFactory) {
+        super(config, clientFactory);
         initializeCluster();
     }
-    
+
     /**
      * Initializes the Redis cluster connection.
      */
     private void initializeCluster() {
         Set<HostAndPort> clusterNodes = config.getClusterNodes();
-        
-        DefaultJedisClientConfig.Builder configBuilder = DefaultJedisClientConfig.builder()
-            .socketTimeoutMillis(config.getSocketTimeout())
-            .connectionTimeoutMillis(config.getConnectionTimeout())
-            .ssl(config.isSSLEnabled());
-        
-        if (requiresAuth()) {
-            if (getAuthUsername() != null && getAuthPassword() != null) {
-                configBuilder.user(getAuthUsername()).password(getAuthPassword());
-            } else if (getAuthPassword() != null) {
-                configBuilder.password(getAuthPassword());
-            }
-        }
-        
-        jedisCluster = new JedisCluster(
-            clusterNodes,
-            configBuilder.build(),
-            MAX_ATTEMPTS,
-            Duration.ofMillis(config.getSocketTimeout()),
-            createConnectionPoolConfig()
-        );
-        
+
+        jedisCluster = clientFactory.createCluster(
+                clusterNodes,
+                buildClientConfig(),
+                MAX_ATTEMPTS,
+                Duration.ofMillis(config.getSocketTimeout()),
+                createConnectionPoolConfig());
+
         logger.info("Initialized Redis cluster connection with " + clusterNodes.size() + " nodes");
     }
     

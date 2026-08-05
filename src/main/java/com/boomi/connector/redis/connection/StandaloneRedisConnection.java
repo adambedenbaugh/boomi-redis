@@ -1,5 +1,6 @@
 package com.boomi.connector.redis.connection;
 
+import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.Response;
@@ -14,29 +15,23 @@ import java.util.logging.Logger;
  * Uses a direct Jedis connection for all operations.
  */
 public class StandaloneRedisConnection extends BaseRedisConnection {
-    
+
     private static final Logger logger = Logger.getLogger(StandaloneRedisConnection.class.getName());
     private Jedis jedis;
-    
+
     public StandaloneRedisConnection(RedisConnectionConfig config) {
-        super(config);
+        this(config, new DefaultJedisClientFactory());
+    }
+
+    StandaloneRedisConnection(RedisConnectionConfig config, JedisClientFactory clientFactory) {
+        super(config, clientFactory);
         initializeConnection();
     }
-    
+
     private void initializeConnection() {
-        String host = config.getHost();
-        int port = config.getPort();
-        
-        jedis = new Jedis(host, port, config.getSocketTimeout(), config.isSSLEnabled());
-        if (requiresAuth()) {
-            if (username != null && password != null) {
-                jedis.auth(username, password);
-            } else if (password != null) {
-                jedis.auth(password);
-            }
-        }
-        
-        logger.info("Initialized standalone Redis connection to " + host + ":" + port);
+        HostAndPort node = new HostAndPort(config.getHost(), config.getPort());
+        jedis = clientFactory.createClient(node, buildClientConfig());
+        logger.info("Initialized standalone Redis connection to " + node);
     }
     
     @Override
