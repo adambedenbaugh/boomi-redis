@@ -135,7 +135,7 @@ public class RedisConnectionConfig {
     public String getAuthIdentity() {
         switch (authenticationType) {
             case BASIC:
-                return "basic:" + username;
+                return "basic:" + username + ":" + java.util.Objects.hashCode(password);
             case MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL:
                 return "entra:" + (entraOAuth2Context == null ? "" : entraOAuth2Context.getClientId());
             default:

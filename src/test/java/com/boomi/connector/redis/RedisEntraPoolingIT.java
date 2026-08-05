@@ -43,6 +43,16 @@ public class RedisEntraPoolingIT {
         REDIS.stop();
     }
 
+    @Before
+    public void resetSharedPoolsBefore() {
+        com.boomi.connector.redis.connection.StandalonePooledRedisConnection.closeAllSharedPools();
+    }
+
+    @After
+    public void resetSharedPoolsAfter() {
+        com.boomi.connector.redis.connection.StandalonePooledRedisConnection.closeAllSharedPools();
+    }
+
     private static void exec(String... cmd) throws Exception {
         org.testcontainers.containers.Container.ExecResult r = REDIS.execInContainer(cmd);
         assertEquals("cmd failed: " + String.join(" ", cmd) + " -> " + r.getStderr(), 0, r.getExitCode());

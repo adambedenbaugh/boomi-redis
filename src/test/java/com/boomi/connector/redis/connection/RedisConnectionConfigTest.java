@@ -6,6 +6,7 @@ import com.boomi.connector.redis.authentication.AuthenticationType;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
+import static org.junit.Assert.assertNotEquals;
 import static org.mockito.Mockito.*;
 
 public class RedisConnectionConfigTest {
@@ -129,5 +130,28 @@ public class RedisConnectionConfigTest {
         BrowseContext ctx = mock(BrowseContext.class);
         when(ctx.getConnectionProperties()).thenReturn(props);
         assertEquals("entra:client-abc", new RedisConnectionConfig(ctx).getAuthIdentity());
+    }
+
+    @Test
+    public void authIdentityBasicDistinguishesPassword() {
+        PropertyMap props1 = mock(PropertyMap.class);
+        when(props1.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props1.getProperty("authenticationType")).thenReturn("Basic");
+        when(props1.getProperty("user")).thenReturn("someuser");
+        when(props1.getProperty("password")).thenReturn("password1");
+        BrowseContext ctx1 = mock(BrowseContext.class);
+        when(ctx1.getConnectionProperties()).thenReturn(props1);
+
+        PropertyMap props2 = mock(PropertyMap.class);
+        when(props2.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props2.getProperty("authenticationType")).thenReturn("Basic");
+        when(props2.getProperty("user")).thenReturn("someuser");
+        when(props2.getProperty("password")).thenReturn("password2");
+        BrowseContext ctx2 = mock(BrowseContext.class);
+        when(ctx2.getConnectionProperties()).thenReturn(props2);
+
+        String identity1 = new RedisConnectionConfig(ctx1).getAuthIdentity();
+        String identity2 = new RedisConnectionConfig(ctx2).getAuthIdentity();
+        assertNotEquals(identity1, identity2);
     }
 }
