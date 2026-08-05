@@ -18,7 +18,7 @@ public class BoomiRedisCredentialsProviderTest {
 
     /** Standard-base64, no padding — matches the connector's Base64.getDecoder(). */
     private static String jwtWithOid(String oid) {
-        Base64.Encoder enc = Base64.getEncoder().withoutPadding();
+        Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
         String header = enc.encodeToString("{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));
         String payload = enc.encodeToString(("{\"oid\":\"" + oid + "\"}").getBytes(StandardCharsets.UTF_8));
         return header + "." + payload + ".";
@@ -87,7 +87,7 @@ public class BoomiRedisCredentialsProviderTest {
 
     @Test
     public void entraTokenMissingOidThrowsNotNpe() throws IOException {
-        Base64.Encoder enc = Base64.getEncoder().withoutPadding();
+        Base64.Encoder enc = Base64.getUrlEncoder().withoutPadding();
         String noOid = enc.encodeToString("{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8))
                 + "." + enc.encodeToString("{\"sub\":\"x\"}".getBytes(StandardCharsets.UTF_8)) + ".";
         OAuth2Context ctx = mock(OAuth2Context.class);

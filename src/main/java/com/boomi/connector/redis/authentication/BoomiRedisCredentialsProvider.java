@@ -96,13 +96,8 @@ public class BoomiRedisCredentialsProvider implements RedisCredentialsProvider {
                     + "Confirm the OAuth 2.0 credential component targets the Entra token endpoint.");
         }
         String base64 = parts[1];
-        switch (base64.length() % 4) {
-            case 2: base64 += "=="; break;
-            case 3: base64 += "="; break;
-            default: break;
-        }
         try {
-            byte[] jsonBytes = Base64.getDecoder().decode(base64);
+            byte[] jsonBytes = Base64.getUrlDecoder().decode(base64);
             String json = new String(jsonBytes, StandardCharsets.UTF_8);
             JsonObject jwt = JsonParser.parseString(json).getAsJsonObject();
             if (jwt.get("oid") == null || jwt.get("oid").isJsonNull()) {
