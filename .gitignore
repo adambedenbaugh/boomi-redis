@@ -55,3 +55,9 @@ src/test/**/*.properties
 
 # Local Claude Code settings (kept on disk, purged from git history)
 .claude/
+
+# Local Copilot instructions (kept on disk, purged from git history)
+copilot-instructions.md
+
+# Tool cache
+.dccache
