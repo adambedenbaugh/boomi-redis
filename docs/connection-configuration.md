@@ -27,8 +27,7 @@ topology, which determines the Redis client it uses. One of `Non-clustered`,
 [Clustering policy](#clustering-policy) for what each value means and how it maps
 to the major managed-Redis offerings.
 
-**Use SSL** — Enables TLS for the connection. Required for Azure Cache for Redis,
-which listens on port `6380`. Default is cleared (`false`).
+**Use SSL** — Enables TLS for the connection. Required for Azure Cache for Redis and Azure Managed Redis. Default is cleared (`false`).
 
 **Authentication Type** — Selects how the connector authenticates to Redis. One of
 `None`, `Basic`, or `Microsoft Entra Client Secret Credential`. Default is `None`.
@@ -53,9 +52,6 @@ Redis. Default is `30`.
 invocations instead of opening a new connection each time. Default is cleared
 (`false`).
 
-> **Attention:** Disable connection pooling when the connector runs on the Boomi
-> Public Runtime Cloud (Atom Cloud).
-
 **Maximum Connections** — The maximum number of connections the pool may hold.
 Applies only when pooling is enabled. Default is `4`.
 
@@ -68,6 +64,13 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 **Maximum Wait Time (seconds)** — Maximum time to wait for an available connection
 from the pool before failing. Applies only when pooling is enabled. Default is
 `60`.
+
+> **Note:** The pooling fields above govern the **standalone** connection path
+> (Non-clustered and Enterprise Clustered). An **OSS Clustered** connection always
+> maintains its own internal per-node connection pool regardless of **Enable
+> Connection Pooling** — when pooling is enabled it uses **Maximum Connections** as
+> the per-node limit, otherwise a built-in default. Leaving **Enable Connection
+> Pooling** off does not disable cluster pooling.
 
 ## Clustering policy
 
@@ -160,16 +163,32 @@ To configure Microsoft Entra authentication:
    Secret Credential` and select the OAuth 2.0 Connection Component in **Microsoft
    Entra OAuth 2.0 Credentials**.
 
-> **Note:** The connector never hardcodes the token endpoint — it uses whatever
-> Access Token URL the OAuth 2.0 component supplies. The connector descriptor
-> pre-fills the Commercial URL and scope as editable defaults; sovereign clouds
-> (Government, China, Germany) work by editing the Access Token URL.
 
 #### Recommended connection settings for Azure Cache for Redis
 
 | Field | Recommended value |
 |-------|-------------------|
+| Hosts | `<namespace>.redis.cache.windows.net:6380` |
+| Clustering Policy | Non-clustered |
 | Use SSL | `true` |
-| Hosts | `<your-cache>.redis.cache.windows.net:6380` |
-| Connection Timeout | `30` seconds |
-| Socket Read Timeout | `30` seconds |
+| Authentication Type | Microsoft Entra Client Secret Credential |
+| OAuth: Client ID | Application ID |
+| OAuth: Client Secret | Application's Client Secret Value. Do not use Client Secret ID |
+| OAuth: Scope | `https://redis.azure.com/.default` |
+| OAuth: Access Token URL | `https://login.microsoftonline.com/{tenent-id}/oauth2/v2.0/token` for Azure Commercial |
+
+
+#### Recommended connection settings for Azure Managed Redis
+
+| Field | Recommended value |
+|-------|-------------------|
+| Hosts | `<namespace>.<region>.redis.azure.net:10000` |
+| Clustering Policy | OSS Clustered |
+| Use SSL | `true` |
+| Authentication Type | Microsoft Entra Client Secret Credential |
+| OAuth: Client ID | Application ID |
+| OAuth: Client Secret | Application's Client Secret Value. Do not use Client Secret ID |
+| OAuth: Scope | `https://redis.azure.com/.default` |
+| OAuth: Access Token URL | `https://login.microsoftonline.com/{tenent-id}/oauth2/v2.0/token` for Azure Commercial |
+
+
