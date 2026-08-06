@@ -182,8 +182,12 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
                 List<String> keys = scanResult.getResult();
 
                 if (!keys.isEmpty()) {
-                    String[] keysArray = keys.toArray(new String[0]);
-                    jedis.del(keysArray);
+                    // Pipelined single-key DELs; never a cross-slot multi-key DEL.
+                    Pipeline pipeline = jedis.pipelined();
+                    for (String key : keys) {
+                        pipeline.del(key);
+                    }
+                    pipeline.sync();
                 }
 
                 cursor = scanResult.getCursor();

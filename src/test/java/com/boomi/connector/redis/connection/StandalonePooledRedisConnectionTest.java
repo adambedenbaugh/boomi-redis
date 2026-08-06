@@ -7,6 +7,11 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import redis.clients.jedis.*;
+import redis.clients.jedis.Pipeline;
+import redis.clients.jedis.params.ScanParams;
+import redis.clients.jedis.resps.ScanResult;
+
+import java.util.Arrays;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -73,6 +78,25 @@ public class StandalonePooledRedisConnectionTest {
         when(jedis.get("k")).thenReturn("v");
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         assertEquals("v", a.get("k"));
+        a.close();
+    }
+
+    @Test
+    public void delAllUsesPipelinedSingleKeyDeletes() {
+        Jedis jedis = mock(Jedis.class);
+        Pipeline pipeline = mock(Pipeline.class);
+        when(pool.getResource()).thenReturn(jedis);
+        when(jedis.pipelined()).thenReturn(pipeline);
+        when(jedis.scan(eq(ScanParams.SCAN_POINTER_START), any(ScanParams.class)))
+                .thenReturn(new ScanResult<>(ScanParams.SCAN_POINTER_START, Arrays.asList("a", "b")));
+
+        StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
+        a.delAll("prefix:");
+
+        verify(pipeline).del("a");
+        verify(pipeline).del("b");
+        verify(pipeline).sync();
+        verify(jedis, never()).del(any(String[].class));
         a.close();
     }
 }

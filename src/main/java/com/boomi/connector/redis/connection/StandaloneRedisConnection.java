@@ -66,14 +66,19 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
             List<String> keys = scanResult.getResult();
             
             if (!keys.isEmpty()) {
-                String[] keysArray = keys.toArray(new String[0]);
-                jedis.del(keysArray);
+                // Pipelined single-key DELs (never a multi-key DEL) so the Enterprise Clustered
+                // proxy never receives a cross-slot multi-key command.
+                Pipeline pipeline = jedis.pipelined();
+                for (String key : keys) {
+                    pipeline.del(key);
+                }
+                pipeline.sync();
             }
-            
+
             cursor = scanResult.getCursor();
         } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
     }
-    
+
     @Override
     public Map<String, String> getAll(String pattern) {
         Map<String, String> result = new HashMap<>();
