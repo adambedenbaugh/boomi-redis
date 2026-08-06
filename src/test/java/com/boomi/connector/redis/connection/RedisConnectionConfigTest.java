@@ -26,6 +26,7 @@ public class RedisConnectionConfigTest {
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
         when(props.getLongProperty("maxIdleTime", 60L)).thenReturn(60L);
         when(props.getLongProperty("maxWaitTime", 60L)).thenReturn(60L);
+        when(props.getProperty("clusteringPolicy")).thenReturn(null); // default -> NON_CLUSTERED
 
         BrowseContext ctx = mock(BrowseContext.class);
         when(ctx.getConnectionProperties()).thenReturn(props);
@@ -35,16 +36,33 @@ public class RedisConnectionConfigTest {
     @Test
     public void testStandaloneHostParsing() {
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("myredis:6379"));
-        assertFalse(config.isCluster());
+        assertEquals(ClusteringPolicy.NON_CLUSTERED, config.getClusteringPolicy());
         assertEquals("myredis", config.getHost());
         assertEquals(6379, config.getPort());
     }
 
     @Test
-    public void testClusterHostParsing() {
+    public void testClusterNodesParsesSingleSeed() {
+        RedisConnectionConfig config = new RedisConnectionConfig(contextWith("seed:6379"));
+        assertEquals(1, config.getClusterNodes().size());
+    }
+
+    @Test
+    public void testClusterNodesParsesMultipleSeeds() {
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("h1:6379,h2:6380,h3:6381"));
-        assertTrue(config.isCluster());
         assertEquals(3, config.getClusterNodes().size());
+    }
+
+    @Test
+    public void testClusteringPolicyParsedFromProperty() {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("None");
+        when(props.getProperty("clusteringPolicy")).thenReturn("OSSClustered");
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        assertEquals(ClusteringPolicy.OSS_CLUSTERED, new RedisConnectionConfig(ctx).getClusteringPolicy());
+        assertTrue(new RedisConnectionConfig(ctx).isOssCluster());
     }
 
     @Test

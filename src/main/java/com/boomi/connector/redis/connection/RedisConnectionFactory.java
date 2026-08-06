@@ -28,30 +28,13 @@ public class RedisConnectionFactory {
         if (context == null) {
             throw new IllegalArgumentException("BrowseContext cannot be null");
         }
-        
-        try {
-            RedisConnectionConfig config = new RedisConnectionConfig(context);
-            
-            if (config.isCluster()) {
-                logger.info("Creating clustered Redis connection");
-                return new ClusteredRedisConnection(config);
-            } else if (config.isPoolEnabled()) {
-                logger.info("Creating standalone pooled Redis connection");
-                return new StandalonePooledRedisConnection(config);
-            } else {
-                logger.info("Creating standalone Redis connection");
-                return new StandaloneRedisConnection(config);
-            }
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create Redis connection: " + e.getMessage(), e);
-        }
+        return createConnection(new RedisConnectionConfig(context));
     }
-    
+
     /**
      * Creates a Redis connection instance with explicit configuration.
      * This method is useful for testing or when you already have a configuration object.
-     * 
+     *
      * @param config The Redis connection configuration
      * @return A RedisConnectionInterface instance configured for the specified Redis deployment
      * @throws IllegalArgumentException if configuration is invalid
@@ -61,19 +44,30 @@ public class RedisConnectionFactory {
         if (config == null) {
             throw new IllegalArgumentException("RedisConnectionConfig cannot be null");
         }
-        
+        return createConnection(config, new DefaultJedisClientFactory());
+    }
+
+    /** Testable routing seam: chooses the client from the declared clustering policy. */
+    static RedisConnectionInterface createConnection(RedisConnectionConfig config, JedisClientFactory factory) {
+        if (config == null) {
+            throw new IllegalArgumentException("RedisConnectionConfig cannot be null");
+        }
         try {
-            if (config.isCluster()) {
-                logger.info("Creating clustered Redis connection");
-                return new ClusteredRedisConnection(config);
-            } else if (config.isPoolEnabled()) {
-                logger.info("Creating standalone pooled Redis connection");
-                return new StandalonePooledRedisConnection(config);
-            } else {
-                logger.info("Creating standalone Redis connection");
-                return new StandaloneRedisConnection(config);
+            switch (config.getClusteringPolicy()) {
+                case OSS_CLUSTERED:
+                    logger.info("Creating OSS clustered Redis connection");
+                    return new ClusteredRedisConnection(config, factory);
+                case ENTERPRISE_CLUSTERED:
+                    // Enterprise proxy hides sharding -> same standalone path as Non-clustered.
+                case NON_CLUSTERED:
+                default:
+                    if (config.isPoolEnabled()) {
+                        logger.info("Creating standalone pooled Redis connection");
+                        return new StandalonePooledRedisConnection(config, factory);
+                    }
+                    logger.info("Creating standalone Redis connection");
+                    return new StandaloneRedisConnection(config, factory);
             }
-            
         } catch (Exception e) {
             throw new RuntimeException("Failed to create Redis connection: " + e.getMessage(), e);
         }

@@ -22,7 +22,8 @@ public class RedisConnectionConfig {
     private final int connectionTimeout;
     private final int socketTimeout;
     private final AuthenticationType authenticationType;
-    
+    private final ClusteringPolicy clusteringPolicy;
+
     // Authentication properties
     private final String username;
     private final String password;
@@ -61,15 +62,20 @@ public class RedisConnectionConfig {
         this.minPoolSize = propertiesMap.getLongProperty("minPoolSize", 1L).intValue();
         this.maxIdleTime = propertiesMap.getLongProperty("maxIdleTime", 60L).intValue();
         this.maxWaitTime = propertiesMap.getLongProperty("maxWaitTime", 60L).intValue();
+
+        this.clusteringPolicy = ClusteringPolicy.fromValue(propertiesMap.getProperty("clusteringPolicy"));
     }
-    
-    /**
-     * Determines if this is a cluster configuration based on multiple hosts.
-     */
-    public boolean isCluster() {
-        return hosts.contains(",");
+
+    /** The declared Redis topology. */
+    public ClusteringPolicy getClusteringPolicy() {
+        return clusteringPolicy;
     }
-    
+
+    /** True when the target is a client-sharded OSS cluster (needs JedisCluster). */
+    public boolean isOssCluster() {
+        return clusteringPolicy.isOssCluster();
+    }
+
     /**
      * Determines if connection pooling is enabled.
      */
@@ -81,9 +87,6 @@ public class RedisConnectionConfig {
      * Gets the first host for single-node connections.
      */
     public String getHost() {
-        if (isCluster()) {
-            throw new IllegalStateException("Cannot get single host from cluster configuration");
-        }
         String[] parts = hosts.split(":");
         if (parts.length != 2) {
             throw new IllegalArgumentException("Invalid Redis Host: " + hosts + ". Syntax is <host>:<port>");
@@ -95,9 +98,6 @@ public class RedisConnectionConfig {
      * Gets the port for single-node connections.
      */
     public int getPort() {
-        if (isCluster()) {
-            throw new IllegalStateException("Cannot get single port from cluster configuration");
-        }
         String[] parts = hosts.split(":");
         if (parts.length != 2) {
             throw new IllegalArgumentException("Invalid Redis Host: " + hosts + ". Syntax is <host>:<port>");
@@ -109,10 +109,6 @@ public class RedisConnectionConfig {
      * Parses cluster nodes from the hosts configuration.
      */
     public Set<HostAndPort> getClusterNodes() {
-        if (!isCluster()) {
-            throw new IllegalStateException("Cannot get cluster nodes from single-node configuration");
-        }
-        
         String[] pairs = hosts.split(",");
         Set<HostAndPort> nodes = new HashSet<>();
         
