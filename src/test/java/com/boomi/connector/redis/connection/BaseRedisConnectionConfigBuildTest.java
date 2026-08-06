@@ -3,7 +3,9 @@ package com.boomi.connector.redis.connection;
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
 import com.boomi.connector.redis.authentication.BoomiRedisCredentialsProvider;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.Test;
+import redis.clients.jedis.Connection;
 import redis.clients.jedis.JedisClientConfig;
 
 import static org.junit.Assert.*;
@@ -15,6 +17,7 @@ public class BaseRedisConnectionConfigBuildTest {
     private static class ProbeConnection extends BaseRedisConnection {
         ProbeConnection(RedisConnectionConfig config) { super(config, new DefaultJedisClientFactory()); }
         JedisClientConfig probe() { return buildClientConfig(); }
+        GenericObjectPoolConfig<Connection> probePool() { return createConnectionPoolConfig(); }
         public String get(String k) { return null; }
         public void set(String k, String v, Long ttl) { }
         public void del(String k) { }
@@ -61,5 +64,12 @@ public class BaseRedisConnectionConfigBuildTest {
         JedisClientConfig cfg = new ProbeConnection(config("Basic")).probe();
         assertTrue("Basic must attach the Boomi credentials provider",
                 cfg.getCredentialsProvider() instanceof BoomiRedisCredentialsProvider);
+    }
+
+    @Test
+    public void clusterPoolMaxTotalIsPositiveWhenPoolingDisabled() {
+        GenericObjectPoolConfig<Connection> pool = new ProbeConnection(config("None")).probePool();
+        assertEquals(8, pool.getMaxTotal());
+        assertTrue("minIdle must not exceed maxTotal", pool.getMinIdle() <= pool.getMaxTotal());
     }
 }

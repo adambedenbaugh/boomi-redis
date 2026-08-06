@@ -14,7 +14,10 @@ import java.util.Set;
  * Handles property parsing, validation, and provides typed access to configuration values.
  */
 public class RedisConnectionConfig {
-    
+
+    /** Default cluster internal-pool size when standalone pooling is disabled. */
+    static final int DEFAULT_CLUSTER_MAX_TOTAL = 8;
+
     private final PropertyMap propertiesMap;
     private final String hosts;
     private final boolean useSSL;
@@ -161,6 +164,17 @@ public class RedisConnectionConfig {
     public String getPassword() { return password; }
     public OAuth2Context getEntraOAuth2Context() { return entraOAuth2Context; }
     public int getPoolSize() { return poolSize; }
+
+    /**
+     * Maximum connections for JedisCluster's internal per-node pool. JedisCluster is always
+     * pooled, so this must be greater than zero even when the standalone "Enable Connection
+     * Pooling" toggle is off (that toggle governs only the standalone connection path). When
+     * pooling is enabled the configured Maximum Connections is used; otherwise a sane default.
+     */
+    public int getClusterMaxTotal() {
+        return poolSize > 0 ? poolSize : DEFAULT_CLUSTER_MAX_TOTAL;
+    }
+
     public int getMinPoolSize() { return minPoolSize; }
     public int getMaxIdleTime() { return maxIdleTime; }
     public int getMaxWaitTime() { return maxWaitTime; }

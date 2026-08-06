@@ -121,6 +121,27 @@ public class RedisConnectionConfigTest {
         assertEquals(0, config.getPoolSize());
     }
 
+    @Test
+    public void clusterMaxTotalDefaultsWhenPoolingDisabled() {
+        RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhost:6379"));
+        assertFalse(config.isPoolEnabled());
+        assertEquals(8, config.getClusterMaxTotal());
+    }
+
+    @Test
+    public void clusterMaxTotalUsesConfiguredSizeWhenPoolingEnabled() {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("None");
+        when(props.getProperty("clusteringPolicy")).thenReturn("OSSClustered");
+        when(props.getBooleanProperty("poolEnabled")).thenReturn(true);
+        when(props.getLongProperty("poolSize", 4L)).thenReturn(6L);
+        when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        assertEquals(6, new RedisConnectionConfig(ctx).getClusterMaxTotal());
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testInvalidHostFormatThrowsOnGetHost() {
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhostnoport"));

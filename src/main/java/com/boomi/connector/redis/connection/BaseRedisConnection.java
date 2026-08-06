@@ -73,8 +73,9 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
     protected GenericObjectPoolConfig<Connection> createConnectionPoolConfig() {
         GenericObjectPoolConfig<Connection> poolConfig = new GenericObjectPoolConfig<>();
         poolConfig.setMaxWait(Duration.ofSeconds(config.getMaxWaitTime()));
-        poolConfig.setMaxTotal(config.getPoolSize());
-        poolConfig.setMinIdle(config.getMinPoolSize());
+        int maxTotal = config.getClusterMaxTotal();
+        poolConfig.setMaxTotal(maxTotal);
+        poolConfig.setMinIdle(Math.min(config.getMinPoolSize(), maxTotal));
         poolConfig.setTestOnBorrow(true);
         poolConfig.setTestOnReturn(true);
         poolConfig.setTestWhileIdle(true);
@@ -83,7 +84,7 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         poolConfig.setNumTestsPerEvictionRun(3);
         poolConfig.setBlockWhenExhausted(true);
 
-        logger.info("Created Jedis Cluster Pool with size: " + config.getPoolSize());
+        logger.info("Created Jedis Cluster Pool with size: " + maxTotal);
         return poolConfig;
     }
 
