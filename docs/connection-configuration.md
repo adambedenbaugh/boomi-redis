@@ -52,6 +52,11 @@ Redis. Default is `30`.
 invocations instead of opening a new connection each time. Default is cleared
 (`false`).
 
+> **Attention:** Disable connection pooling when the connector runs on the Boomi
+> Public Runtime Cloud (Atom Cloud). This applies to the standalone connection path;
+> OSS Clustered connections manage their own internal pool (see the note below the
+> pooling fields).
+
 **Maximum Connections** — The maximum number of connections the pool may hold.
 Applies only when pooling is enabled. Default is `4`.
 

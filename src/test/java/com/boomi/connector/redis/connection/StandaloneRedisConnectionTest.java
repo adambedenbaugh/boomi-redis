@@ -9,7 +9,6 @@ import redis.clients.jedis.resps.ScanResult;
 
 import java.util.Arrays;
 
-import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 public class StandaloneRedisConnectionTest {

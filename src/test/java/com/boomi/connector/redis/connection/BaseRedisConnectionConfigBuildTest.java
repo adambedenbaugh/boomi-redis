@@ -72,4 +72,18 @@ public class BaseRedisConnectionConfigBuildTest {
         assertEquals(8, pool.getMaxTotal());
         assertTrue("minIdle must not exceed maxTotal", pool.getMinIdle() <= pool.getMaxTotal());
     }
+
+    @Test
+    public void clusterPoolMinIdleClampedToMaxTotal() {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("None");
+        when(props.getLongProperty("minPoolSize", 1L)).thenReturn(20L);
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+
+        GenericObjectPoolConfig<Connection> pool = new ProbeConnection(new RedisConnectionConfig(ctx)).probePool();
+        assertEquals(8, pool.getMaxTotal());
+        assertEquals("minIdle must be clamped to maxTotal", 8, pool.getMinIdle());
+    }
 }
