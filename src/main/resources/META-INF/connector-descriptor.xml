@@ -4,8 +4,29 @@
 	<description>Redis Connector</description>
 
     <field id="hosts" label="Hosts" type="string">
-        <helpText>For Redis Standalone, please provide the host and port separate with a semi-colon. For Redis Clustered, please provide the list of the hosts with a comma to separate them. For instance: host1:port1,host2:port2</helpText>
+        <helpText>Redis endpoint as host:port (note the colon). For OSS Clustered you may provide one or more
+            comma-separated seed nodes (host1:port1,host2:port2) - any reachable seed is enough; the client discovers
+            the rest of the topology. For Non-clustered and Enterprise Clustered, provide the single endpoint.</helpText>
         <defaultValue>localhost:6379</defaultValue>
+    </field>
+
+    <field id="clusteringPolicy" label="Clustering Policy" type="string" displayType="list">
+        <helpText>How the target Redis presents its topology.
+            Non-clustered: a single Redis node (e.g. Azure Cache Basic/Standard, a self-hosted single instance).
+            OSS Clustered: a client-sharded Redis Cluster that returns MOVED/ASK - Azure Managed Redis OSS clustering policy,
+            AWS ElastiCache with cluster mode enabled, GCP Memorystore for Redis Cluster, or self-hosted cluster-enabled.
+            Enterprise Clustered: a proxy-fronted cluster reached through a single endpoint (Azure/Redis Enterprise
+            clustering policy); behaves like a single endpoint to the client.</helpText>
+        <defaultValue>NonClustered</defaultValue>
+        <allowedValue label="Non-clustered">
+            <value>NonClustered</value>
+        </allowedValue>
+        <allowedValue label="OSS Clustered">
+            <value>OSSClustered</value>
+        </allowedValue>
+        <allowedValue label="Enterprise Clustered">
+            <value>EnterpriseClustered</value>
+        </allowedValue>
     </field>
 
     <field id="useSSL" label="Use SSL" type="boolean">
