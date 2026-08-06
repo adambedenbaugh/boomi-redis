@@ -73,12 +73,13 @@ public class ClusteredRedisConnection extends BaseRedisConnection {
         do {
             ScanResult<String> scanResult = jedisCluster.scan(cursor, scanParams);
             List<String> keys = scanResult.getResult();
-            
-            if (!keys.isEmpty()) {
-                String[] keysArray = keys.toArray(new String[0]);
-                jedisCluster.del(keysArray);
+
+            // Delete one key per call. A multi-key DEL whose keys span hash slots fails
+            // with CROSSSLOT on an OSS cluster, so batched del(String[]) is not safe here.
+            for (String key : keys) {
+                jedisCluster.del(key);
             }
-            
+
             cursor = scanResult.getCursor();
         } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
     }
