@@ -10,6 +10,8 @@ import redis.clients.jedis.resps.ScanResult;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.*;
@@ -41,20 +43,63 @@ public class ClusteredRedisConnectionTest {
     }
 
     @Test
-    public void delAllDeletesOneKeyPerCallNeverMultiKey() {
+    public void delAllScansEachNodePerKeyDelNeverClusterScan() {
         JedisCluster cluster = mock(JedisCluster.class);
-        when(cluster.scan(eq(ScanParams.SCAN_POINTER_START), any(ScanParams.class)))
+        ConnectionPool pool = mock(ConnectionPool.class);
+        Connection conn = mock(Connection.class);
+        when(pool.getResource()).thenReturn(conn);
+        Map<String, ConnectionPool> nodes = new HashMap<>();
+        nodes.put("127.0.0.1:7000", pool);
+        when(cluster.getClusterNodes()).thenReturn(nodes);
+
+        Jedis node = mock(Jedis.class);
+        when(node.scan(eq(ScanParams.SCAN_POINTER_START), any(ScanParams.class)))
                 .thenReturn(new ScanResult<>(ScanParams.SCAN_POINTER_START, Arrays.asList("a", "b")));
+
         JedisClientFactory factory = mock(JedisClientFactory.class);
         when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
                 any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(cluster);
+        when(factory.createClientFromConnection(conn)).thenReturn(node);
 
-        ClusteredRedisConnection conn = new ClusteredRedisConnection(clusterConfig(), factory);
-        conn.delAll("prefix:");
+        ClusteredRedisConnection c = new ClusteredRedisConnection(clusterConfig(), factory);
+        c.delAll("prefix:");
 
+        verify(node).scan(eq(ScanParams.SCAN_POINTER_START), any(ScanParams.class));
         verify(cluster).del("a");
         verify(cluster).del("b");
         verify(cluster, never()).del(any(String[].class));
-        conn.close();
+        verify(cluster, never()).scan(anyString(), any(ScanParams.class));
+        c.close();
+    }
+
+    @Test
+    public void getAllScansEachNodeAndGetsPerKeyNeverClusterScan() {
+        JedisCluster cluster = mock(JedisCluster.class);
+        ConnectionPool pool = mock(ConnectionPool.class);
+        Connection conn = mock(Connection.class);
+        when(pool.getResource()).thenReturn(conn);
+        Map<String, ConnectionPool> nodes = new HashMap<>();
+        nodes.put("127.0.0.1:7000", pool);
+        when(cluster.getClusterNodes()).thenReturn(nodes);
+        when(cluster.get("a")).thenReturn("1");
+        when(cluster.get("b")).thenReturn("2");
+
+        Jedis node = mock(Jedis.class);
+        when(node.scan(eq(ScanParams.SCAN_POINTER_START), any(ScanParams.class)))
+                .thenReturn(new ScanResult<>(ScanParams.SCAN_POINTER_START, Arrays.asList("a", "b")));
+
+        JedisClientFactory factory = mock(JedisClientFactory.class);
+        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
+                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(cluster);
+        when(factory.createClientFromConnection(conn)).thenReturn(node);
+
+        ClusteredRedisConnection c = new ClusteredRedisConnection(clusterConfig(), factory);
+        Map<String, String> result = c.getAll("prefix:");
+
+        assertEquals(2, result.size());
+        assertEquals("1", result.get("a"));
+        assertEquals("2", result.get("b"));
+        verify(cluster, never()).scan(anyString(), any(ScanParams.class));
+        c.close();
     }
 }

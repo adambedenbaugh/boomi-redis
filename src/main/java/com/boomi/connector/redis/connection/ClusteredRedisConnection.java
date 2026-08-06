@@ -67,50 +67,51 @@ public class ClusteredRedisConnection extends BaseRedisConnection {
     @Override
     public void delAll(String pattern) {
         String scanPattern = prepareScanPattern(pattern);
-        ScanParams scanParams = new ScanParams().count(100).match(scanPattern);
-        String cursor = ScanParams.SCAN_POINTER_START;
-        
-        do {
-            ScanResult<String> scanResult = jedisCluster.scan(cursor, scanParams);
-            List<String> keys = scanResult.getResult();
-
-            // Delete one key per call. A multi-key DEL whose keys span hash slots fails
-            // with CROSSSLOT on an OSS cluster, so batched del(String[]) is not safe here.
-            for (String key : keys) {
-                jedisCluster.del(key);
-            }
-
-            cursor = scanResult.getCursor();
-        } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
+        // Delete one key per call: a multi-key DEL across hash slots fails with CROSSSLOT.
+        for (String key : scanAllNodes(scanPattern)) {
+            jedisCluster.del(key);
+        }
     }
-    
+
     @Override
     public Map<String, String> getAll(String pattern) {
         Map<String, String> result = new HashMap<>();
         String scanPattern = prepareScanPattern(pattern);
-        ScanParams scanParams = new ScanParams().count(100).match(scanPattern);
-        String cursor = ScanParams.SCAN_POINTER_START;
-        
         logger.info("Cluster scanning with pattern: " + scanPattern);
-        
-        do {
-            ScanResult<String> scanResult = jedisCluster.scan(cursor, scanParams);
-            List<String> keys = scanResult.getResult();
-            
-            // For clusters, we need individual gets due to key distribution across nodes
-            for (String key : keys) {
-                String value = jedisCluster.get(key);
-                if (value != null) {
-                    result.put(key, value);
-                }
+        for (String key : scanAllNodes(scanPattern)) {
+            String value = jedisCluster.get(key);
+            if (value != null) {
+                result.put(key, value);
             }
-            cursor = scanResult.getCursor();
-        } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
-        
+        }
         logger.info("Total keys found in cluster: " + result.size());
         return result;
     }
-    
+
+    /**
+     * Enumerates keys matching the pattern across the whole cluster by SCANning each node
+     * directly. JedisCluster.scan(cursor, MATCH) requires the MATCH pattern to contain a
+     * {hash-tag} so it can route to a single slot; a prefix wildcard has none, so we scan
+     * every node's keyspace instead and union the results. Keys dedupe naturally (a Set),
+     * so any replica nodes returned by getClusterNodes() are harmless.
+     */
+    private Set<String> scanAllNodes(String scanPattern) {
+        Set<String> keys = new HashSet<>();
+        ScanParams scanParams = new ScanParams().count(100).match(scanPattern);
+        for (ConnectionPool pool : jedisCluster.getClusterNodes().values()) {
+            try (Connection conn = pool.getResource()) {
+                Jedis node = clientFactory.createClientFromConnection(conn);
+                String cursor = ScanParams.SCAN_POINTER_START;
+                do {
+                    ScanResult<String> scanResult = node.scan(cursor, scanParams);
+                    keys.addAll(scanResult.getResult());
+                    cursor = scanResult.getCursor();
+                } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
+            }
+        }
+        return keys;
+    }
+
     @Override
     public boolean isValid() {
         try {

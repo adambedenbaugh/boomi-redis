@@ -25,4 +25,9 @@ public class DefaultJedisClientFactory implements JedisClientFactory {
                                       Duration maxTotalRetriesDuration, GenericObjectPoolConfig<Connection> poolConfig) {
         return new JedisCluster(nodes, clientConfig, maxAttempts, maxTotalRetriesDuration, poolConfig);
     }
+
+    @Override
+    public Jedis createClientFromConnection(Connection connection) {
+        return new Jedis(connection);
+    }
 }

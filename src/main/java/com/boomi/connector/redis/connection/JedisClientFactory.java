@@ -15,4 +15,7 @@ public interface JedisClientFactory {
 
     JedisCluster createCluster(Set<HostAndPort> nodes, JedisClientConfig clientConfig, int maxAttempts,
                                Duration maxTotalRetriesDuration, GenericObjectPoolConfig<Connection> poolConfig);
+
+    /** Wraps a pooled cluster-node Connection as a Jedis for direct per-node commands (e.g. SCAN). */
+    Jedis createClientFromConnection(Connection connection);
 }
