@@ -57,8 +57,6 @@ public class RedisConnectionFactory {
                 case OSS_CLUSTERED:
                     logger.info("Creating OSS clustered Redis connection");
                     return new ClusteredRedisConnection(config, factory);
-                case ENTERPRISE_CLUSTERED:
-                    // Enterprise proxy hides sharding -> same standalone path as Non-clustered.
                 case NON_CLUSTERED:
                 default:
                     if (config.isPoolEnabled()) {

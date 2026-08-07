@@ -9,7 +9,15 @@ public class ClusteringPolicyTest {
     public void fromValueMapsEachStoredValue() {
         assertEquals(ClusteringPolicy.NON_CLUSTERED, ClusteringPolicy.fromValue("NonClustered"));
         assertEquals(ClusteringPolicy.OSS_CLUSTERED, ClusteringPolicy.fromValue("OSSClustered"));
-        assertEquals(ClusteringPolicy.ENTERPRISE_CLUSTERED, ClusteringPolicy.fromValue("EnterpriseClustered"));
+    }
+
+    @Test
+    public void fromValueMapsLegacyEnterpriseValueToNonClustered() {
+        // "Enterprise Clustered" was retired from the UI; it always used the single-endpoint
+        // (standalone) path, so already-deployed connections storing it must keep working.
+        assertEquals(ClusteringPolicy.NON_CLUSTERED, ClusteringPolicy.fromValue("EnterpriseClustered"));
+        assertEquals(ClusteringPolicy.NON_CLUSTERED, ClusteringPolicy.fromValue("  enterpriseclustered "));
+        assertFalse(ClusteringPolicy.fromValue("EnterpriseClustered").isOssCluster());
     }
 
     @Test
@@ -38,6 +46,5 @@ public class ClusteringPolicyTest {
     public void isOssClusterOnlyForOss() {
         assertTrue(ClusteringPolicy.OSS_CLUSTERED.isOssCluster());
         assertFalse(ClusteringPolicy.NON_CLUSTERED.isOssCluster());
-        assertFalse(ClusteringPolicy.ENTERPRISE_CLUSTERED.isOssCluster());
     }
 }
