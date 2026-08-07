@@ -186,7 +186,7 @@ Inside Boomi, a connector is used through a **Connection** (where the cache live
 A minimal, no-auth local setup to prove it works:
 
 - **Hosts:** `localhost:6379`
-- **Clustering Policy:** `Non-clustered`
+- **Clustering Policy:** `Single Endpoint`
 - **Use SSL:** off
 - **Authentication Type:** `None`
 - **Enable Connection Pooling:** off

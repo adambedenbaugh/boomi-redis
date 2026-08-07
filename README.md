@@ -21,7 +21,7 @@ This README is a quick-start overview. For the full technical documentation, see
 - **Operations**: GET, UPSERT, DELETE (single key and wildcard)
 - **Authentication**: None, Basic (username/password), Microsoft Entra ID (OAuth 2.0 client credentials)
 - **Deployment modes**: Standalone, connection-pooled standalone, Cluster
-- **Clustering Policy**: Non-clustered, OSS Clustered, Enterprise Clustered — see [Clustering Policy](#clustering-policy)
+- **Clustering Policy**: Single Endpoint, OSS Cluster — see [Clustering Policy](#clustering-policy)
 - **SSL/TLS**: Configurable; required for Azure Cache for Redis (port 6380)
 - **Key prefixes**: Configurable per operation; prefix can be stripped from GET responses
 - **TTL**: Configurable per UPSERT operation (in milliseconds); overridable at runtime
@@ -31,11 +31,10 @@ This README is a quick-start overview. For the full technical documentation, see
 
 The connection's **Clustering Policy** field tells the connector how the target Redis presents its topology:
 
-- **Non-clustered** — a single Redis node (e.g. Azure Cache Basic/Standard, a self-hosted single instance). Default.
-- **OSS Clustered** — a client-sharded Redis Cluster that returns `MOVED`/`ASK` redirects. Maps to: Azure Managed Redis OSS clustering policy, AWS ElastiCache with cluster mode enabled, GCP Memorystore for Redis Cluster, or self-hosted Redis with `cluster-enabled yes`.
-- **Enterprise Clustered** — a proxy-fronted cluster reached through a single endpoint (the Azure/Redis Enterprise clustering policy); it behaves like a single endpoint to the client.
+- **Single Endpoint** (default) — The client talks to one address and does no cluster routing. Choose this for a single Redis node (Azure Cache Basic/Standard, a self-hosted instance) or a proxy-fronted cluster that presents one endpoint — including Redis Enterprise / Redis Cloud databases using the "Enterprise" clustering policy and Azure Managed Redis configured with the Enterprise clustering policy. The proxy hides sharding, so the client treats it like a single server (standalone, optionally pooled, Jedis client).
+- **OSS Cluster** — A client-sharded Redis Cluster that returns MOVED/ASK redirects; the client discovers the topology and routes keys itself. Choose this for Redis OSS cluster mode, AWS ElastiCache with cluster mode enabled, GCP Memorystore for Redis Cluster, Azure Managed Redis with the OSS clustering policy, or a self-hosted cluster-enabled deployment.
 
-**Non-clustered** and **Enterprise Clustered** use the same single-endpoint connection under the hood — only **OSS Clustered** engages cluster-aware connection handling. The **Hosts** field takes a single `host:port` endpoint for Non-clustered and Enterprise Clustered; for OSS Clustered it accepts one or more comma-separated seed nodes (`host1:port1,host2:port2`) — any reachable seed lets the client discover the rest of the topology.
+The **Hosts** field takes a single `host:port` endpoint for **Single Endpoint**; for **OSS Cluster** it accepts one or more comma-separated seed nodes (`host1:port1,host2:port2`) — any reachable seed lets the client discover the rest of the topology.
 
 ## Connector Architecture
 

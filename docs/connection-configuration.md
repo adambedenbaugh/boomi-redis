@@ -15,15 +15,14 @@ connector expects; see [Clustering policy](#clustering-policy).
 ## Connection tab
 
 **Hosts** — The Redis endpoint(s), each as `host:port` (note the colon; for
-example, `localhost:6379`). For **Non-clustered** and **Enterprise Clustered**,
-provide the single endpoint. For **OSS Clustered**, you may provide one or more
-comma-separated seed nodes (`host1:port1,host2:port2,...`) — any reachable seed is
-enough, as the client discovers the rest of the topology. Default is
-`localhost:6379`.
+example, `localhost:6379`). For **Single Endpoint**, provide the single endpoint.
+For **OSS Cluster**, you may provide one or more comma-separated seed nodes
+(`host1:port1,host2:port2,...`) — any reachable seed is enough, as the client
+discovers the rest of the topology. Default is `localhost:6379`.
 
 **Clustering Policy** — Tells the connector how the target Redis presents its
-topology, which determines the Redis client it uses. One of `Non-clustered`,
-`OSS Clustered`, or `Enterprise Clustered`. Default is `Non-clustered`. See
+topology, which determines the Redis client it uses. One of `Single Endpoint` or
+`OSS Cluster`. Default is `Single Endpoint`. See
 [Clustering policy](#clustering-policy) for what each value means and how it maps
 to the major managed-Redis offerings.
 
@@ -56,7 +55,7 @@ invocations instead of opening a new connection each time. Default is cleared
 
 > **Attention:** Disable connection pooling when the connector runs on the Boomi
 > Public Runtime Cloud (Atom Cloud). This applies to the standalone connection path;
-> OSS Clustered connections manage their own internal pool (see the note below the
+> OSS Cluster connections manage their own internal pool (see the note below the
 > pooling fields).
 
 **Maximum Connections** — The maximum number of connections the pool may hold.
@@ -73,11 +72,11 @@ from the pool before failing. Applies only when pooling is enabled. Default is
 `5`.
 
 > **Note:** The pooling fields above govern the **standalone** connection path
-> (Non-clustered and Enterprise Clustered). An **OSS Clustered** connection always
-> maintains its own internal per-node connection pool regardless of **Enable
-> Connection Pooling** — when pooling is enabled it uses **Maximum Connections** as
-> the per-node limit, otherwise a built-in default. Leaving **Enable Connection
-> Pooling** off does not disable cluster pooling.
+> (**Single Endpoint**). An **OSS Cluster** connection always maintains its own
+> internal per-node connection pool regardless of **Enable Connection Pooling** —
+> when pooling is enabled it uses **Maximum Connections** as the per-node limit,
+> otherwise a built-in default. Leaving **Enable Connection Pooling** off does not
+> disable cluster pooling.
 
 ## Clustering policy
 
@@ -90,37 +89,39 @@ cause of a `redis.clients.jedis.exceptions.JedisMovedDataException: MOVED ...`
 error — a standalone client pointed at a client-sharded cluster cannot follow the
 redirect.
 
-**Non-clustered** — A single Redis node. The connector uses a standalone (or
-connection-pooled standalone) client. Default.
+**Single Endpoint** — The client talks to one address and does no cluster
+routing. Choose this for a single Redis node (Azure Cache Basic/Standard, a
+self-hosted single instance) or a proxy-fronted cluster that presents one
+endpoint — including Redis Enterprise / Redis Cloud databases using the
+"Enterprise" clustering policy and Azure Managed Redis configured with the
+Enterprise clustering policy. The proxy hides sharding behind the single
+endpoint, so the client treats it exactly like a single server; internally the
+connector builds a standalone (optionally pooled) Jedis client. Default.
 
-**OSS Clustered** — A client-sharded Redis Cluster that returns `MOVED`/`ASK`
-redirects. The connector uses a cluster-aware client that discovers the topology
-and routes each command to the owning shard.
-
-**Enterprise Clustered** — A sharded cluster reached through a single proxy
-endpoint that performs routing server-side and never returns `MOVED`. To the
-client this behaves like a single endpoint, so the connector uses the same
-standalone/pooled client as **Non-clustered**.
-
-> **Note:** **Non-clustered** and **Enterprise Clustered** use the same
-> single-endpoint connection under the hood; only **OSS Clustered** engages
-> cluster-aware handling. All three are offered so the field matches the wording
-> in the Azure portal and other managed-Redis consoles.
+**OSS Cluster** — A client-sharded Redis Cluster that returns MOVED/ASK
+redirects and expects the client to discover the topology and route keys
+itself. Choose this for Redis OSS cluster mode, AWS ElastiCache with cluster
+mode enabled, GCP Memorystore for Redis Cluster, Azure Managed Redis with the
+OSS clustering policy, or a self-hosted cluster-enabled deployment. The
+connector builds a cluster-aware JedisCluster client that follows redirects and
+enumerates nodes (e.g. for `*` wildcard SCAN). Provide one or more
+comma-separated seed nodes; any reachable seed is enough for topology
+discovery.
 
 How the policies map to the major offerings:
 
 | Offering | Policy to select |
 |----------|------------------|
-| Single-node Redis (Azure Cache Basic/Standard, a self-hosted instance) | `Non-clustered` |
-| Azure Managed Redis / Redis Enterprise — **OSS** clustering policy | `OSS Clustered` |
-| Azure Managed Redis / Redis Enterprise — **Enterprise** clustering policy | `Enterprise Clustered` |
-| AWS ElastiCache with **cluster mode enabled** | `OSS Clustered` |
-| AWS ElastiCache with **cluster mode disabled** | `Non-clustered` |
-| GCP Memorystore for Redis Cluster | `OSS Clustered` |
-| GCP Memorystore for Redis (Basic/Standard) | `Non-clustered` |
-| Self-hosted Redis with `cluster-enabled yes` | `OSS Clustered` |
+| Single-node Redis (Azure Cache Basic/Standard, a self-hosted instance) | `Single Endpoint` |
+| Azure Managed Redis / Redis Enterprise — **OSS** clustering policy | `OSS Cluster` |
+| Azure Managed Redis / Redis Enterprise — **Enterprise** clustering policy | `Single Endpoint` |
+| AWS ElastiCache with **cluster mode enabled** | `OSS Cluster` |
+| AWS ElastiCache with **cluster mode disabled** | `Single Endpoint` |
+| GCP Memorystore for Redis Cluster | `OSS Cluster` |
+| GCP Memorystore for Redis (Basic/Standard) | `Single Endpoint` |
+| Self-hosted Redis with `cluster-enabled yes` | `OSS Cluster` |
 
-> **Note:** For an **OSS Clustered** connection over TLS to a managed cluster
+> **Note:** For an **OSS Cluster** connection over TLS to a managed cluster
 > (e.g. Azure Managed Redis), the cluster-aware client discovers individual shard
 > node addresses and connects to them directly. Confirm those node addresses are
 > reachable from the runtime (Atom) and that TLS/SNI succeeds against them.
@@ -176,7 +177,7 @@ To configure Microsoft Entra authentication:
 | Field | Recommended value |
 |-------|-------------------|
 | Hosts | `<namespace>.redis.cache.windows.net:6380` |
-| Clustering Policy | Non-clustered |
+| Clustering Policy | Single Endpoint |
 | Use SSL | `true` |
 | Authentication Type | Microsoft Entra Client Secret Credential |
 | OAuth: Client ID | Application ID |
@@ -190,7 +191,7 @@ To configure Microsoft Entra authentication:
 | Field | Recommended value |
 |-------|-------------------|
 | Hosts | `<namespace>.<region>.redis.azure.net:10000` |
-| Clustering Policy | OSS Clustered |
+| Clustering Policy | OSS Cluster |
 | Use SSL | `true` |
 | Authentication Type | Microsoft Entra Client Secret Credential |
 | OAuth: Client ID | Application ID |

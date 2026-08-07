@@ -13,7 +13,7 @@ For the top-level project overview, see the [project README](../README.md).
 | Page | What it covers |
 |------|----------------|
 | [Getting Started](getting-started.md) | Develop, build, and test the Redis custom connector — from a fresh clone to uploadable artifacts. |
-| [Connection Configuration](connection-configuration.md) | Every connection field, the clustering policies (Non-clustered, OSS, Enterprise), and the three authentication modes (None, Basic, Microsoft Entra). |
+| [Connection Configuration](connection-configuration.md) | Every connection field, the clustering policies (Single Endpoint, OSS Cluster), and the three authentication modes (None, Basic, Microsoft Entra). |
 | [Operation Configuration](operation-configuration.md) | The GET / UPSERT / DELETE operations, their properties, and JSON request/response profiles. |
 | [Deploying connector to the Boomi Platform](https://developer.boomi.com/docs/Connectors/DeployConnectors/Versioning_and_releasing_connector)|Boomi's official documentation on deploying a connector to Boomi Integration. |
 | [Updating the Connector Icon](updating-connector-icon.md) | How to update the connector's icon. |
@@ -25,7 +25,7 @@ For the top-level project overview, see the [project README](../README.md).
 | **Operations** | GET, UPSERT, DELETE — single key and `*` wildcard |
 | **Authentication** | None · Basic (user/password) · Microsoft Entra ID (OAuth 2.0 client credentials) |
 | **Deployment modes** | Standalone · connection-pooled standalone · clustered |
-| **Clustering Policy** | Non-clustered · OSS Clustered · Enterprise Clustered |
+| **Clustering Policy** | Single Endpoint · OSS Cluster |
 | **SSL/TLS** | Configurable; required for Azure Cache for Redis (port 6380) |
 | **Connector SDK** | Boomi Connector SDK 2.22.1 |
 | **Redis client** | Jedis 5.2.0 (Redis 6+ compatible) |
