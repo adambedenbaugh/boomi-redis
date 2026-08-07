@@ -6,6 +6,8 @@ import com.boomi.connector.redis.RedisConnector;
 import com.boomi.connector.redis.RedisConnection;
 import com.boomi.connector.testutil.ConnectorTester;
 import com.boomi.connector.testutil.SimpleOperationResult;
+import com.boomi.connector.testutil.SimpleTrackedData;
+import com.boomi.connector.testutil.MutableDynamicPropertyMap;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.MockedConstruction;
@@ -71,6 +73,28 @@ public class RedisUpsertOperationTest {
             assertFalse(results.isEmpty());
             assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
             verify(mocked.constructed().get(0)).set("prefix:k", "v", 60000L);
+        }
+    }
+
+    @Test
+    public void testUpsertWithDynamicTtlOverridePassesOverrideToSet() throws Exception {
+        // Static set_ttl stays at its default (-1); the value is supplied per-document
+        // as a Dynamic Operation Property override, which arrives via
+        // ObjectData.getDynamicOperationProperties() rather than getOperationProperties().
+        String payload = "{\"key\": \"k\", \"value\": \"v\"}";
+        MutableDynamicPropertyMap dynamicOpProps = new MutableDynamicPropertyMap();
+        dynamicOpProps.addProperty("set_ttl", "2");
+        SimpleTrackedData data = new SimpleTrackedData(1,
+                new ByteArrayInputStream(payload.getBytes()), null, null, dynamicOpProps);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            List<SimpleOperationResult> results = tester.executeUpsertOperationWithTrackedData(
+                    Collections.singletonList(data));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
+            verify(mocked.constructed().get(0)).set("prefix:k", "v", 2L);
         }
     }
 
