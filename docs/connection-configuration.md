@@ -43,10 +43,12 @@ OAuth 2.0 Connection Component that supplies the client credentials and token
 endpoint. See [Microsoft Entra authentication settings](#microsoft-entra-authentication-settings).
 
 **Connection Timeout (seconds)** — Maximum time to wait when establishing a
-connection to Redis. Default is `30`.
+connection to Redis. Default is `5`. For Azure Redis with SSL/Auth, increase this
+(for example, 30 seconds).
 
 **Socket Read Timeout (seconds)** — Maximum time to wait for a read response from
-Redis. Default is `30`.
+Redis. Default is `5`. For Azure Redis with SSL/Auth, increase this (for example,
+30 seconds).
 
 **Enable Connection Pooling** — Reuses physical connections across process
 invocations instead of opening a new connection each time. Default is cleared
@@ -68,7 +70,7 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 
 **Maximum Wait Time (seconds)** — Maximum time to wait for an available connection
 from the pool before failing. Applies only when pooling is enabled. Default is
-`60`.
+`5`.
 
 > **Note:** The pooling fields above govern the **standalone** connection path
 > (Non-clustered and Enterprise Clustered). An **OSS Clustered** connection always

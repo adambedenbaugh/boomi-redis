@@ -51,8 +51,8 @@ public class RedisConnectionConfig {
         this.poolEnabled = propertiesMap.getBooleanProperty("poolEnabled");
         
         // Parse timeout configurations - convert seconds to milliseconds
-        this.connectionTimeout = propertiesMap.getLongProperty("connectionTimeout", 30L).intValue() * 1000;
-        this.socketTimeout = propertiesMap.getLongProperty("socketTimeout", 30L).intValue() * 1000;
+        this.connectionTimeout = propertiesMap.getLongProperty("connectionTimeout", 5L).intValue() * 1000;
+        this.socketTimeout = propertiesMap.getLongProperty("socketTimeout", 5L).intValue() * 1000;
         
         // Parse authentication
         this.authenticationType = AuthenticationType.fromValue(propertiesMap.getProperty("authenticationType"));
@@ -64,7 +64,7 @@ public class RedisConnectionConfig {
         this.poolSize = poolEnabled ? propertiesMap.getLongProperty("poolSize", 4L).intValue() : 0;
         this.minPoolSize = propertiesMap.getLongProperty("minPoolSize", 1L).intValue();
         this.maxIdleTime = propertiesMap.getLongProperty("maxIdleTime", 60L).intValue();
-        this.maxWaitTime = propertiesMap.getLongProperty("maxWaitTime", 60L).intValue();
+        this.maxWaitTime = propertiesMap.getLongProperty("maxWaitTime", 5L).intValue();
 
         this.clusteringPolicy = ClusteringPolicy.fromValue(propertiesMap.getProperty("clusteringPolicy"));
     }

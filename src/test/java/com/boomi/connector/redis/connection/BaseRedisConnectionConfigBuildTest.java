@@ -31,8 +31,8 @@ public class BaseRedisConnectionConfigBuildTest {
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn(authType);
         when(props.getBooleanProperty("useSSL")).thenReturn(true);
-        when(props.getLongProperty("connectionTimeout", 30L)).thenReturn(5L);
-        when(props.getLongProperty("socketTimeout", 30L)).thenReturn(7L);
+        when(props.getLongProperty("connectionTimeout", 5L)).thenReturn(5L);
+        when(props.getLongProperty("socketTimeout", 5L)).thenReturn(7L);
         BrowseContext ctx = mock(BrowseContext.class);
         when(ctx.getConnectionProperties()).thenReturn(props);
         return new RedisConnectionConfig(ctx);

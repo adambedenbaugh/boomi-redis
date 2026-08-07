@@ -92,13 +92,13 @@
     </field>
 
     <field id="connectionTimeout" label="Connection Timeout (seconds)" type="integer">
-        <helpText>Maximum time to wait for connection establishment. For Azure Redis with SSL/Auth, recommended minimum is 30 seconds.</helpText>
-        <defaultValue>30</defaultValue>
+        <helpText>Maximum time to wait for connection establishment. For Azure Redis with SSL/Auth, increase this (for example, 30 seconds).</helpText>
+        <defaultValue>5</defaultValue>
     </field>
 
     <field id="socketTimeout" label="Socket Read Timeout (seconds)" type="integer">
-        <helpText>Maximum time to wait for read operations. For Azure Redis with SSL/Auth, recommended minimum is 30 seconds.</helpText>
-        <defaultValue>30</defaultValue>
+        <helpText>Maximum time to wait for read operations. For Azure Redis with SSL/Auth, increase this (for example, 30 seconds).</helpText>
+        <defaultValue>5</defaultValue>
     </field>
 
     <field id="poolEnabled" label="Enable Connection Pooling" type="boolean">
@@ -135,7 +135,7 @@
     </field>
     <field id="maxWaitTime" label="Maximum Wait Time" type="integer">
         <helpText>Maximum wait time in seconds for a connection from the pool.</helpText>
-        <defaultValue>60</defaultValue>
+        <defaultValue>5</defaultValue>
         <visibilityCondition>
             <valueCondition fieldId="poolEnabled">
                 <value>true</value>

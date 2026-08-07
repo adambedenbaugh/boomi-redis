@@ -16,8 +16,8 @@ public class RedisConnectionConfigTest {
         when(props.getProperty("hosts")).thenReturn(hosts);
         when(props.getBooleanProperty("useSSL")).thenReturn(false);
         when(props.getBooleanProperty("poolEnabled")).thenReturn(false);
-        when(props.getLongProperty("connectionTimeout", 30L)).thenReturn(30L);
-        when(props.getLongProperty("socketTimeout", 30L)).thenReturn(30L);
+        when(props.getLongProperty("connectionTimeout", 5L)).thenReturn(5L);
+        when(props.getLongProperty("socketTimeout", 5L)).thenReturn(5L);
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getProperty("user")).thenReturn(null);
         when(props.getProperty("password")).thenReturn(null);
@@ -25,7 +25,7 @@ public class RedisConnectionConfigTest {
         when(props.getLongProperty("poolSize", 4L)).thenReturn(4L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
         when(props.getLongProperty("maxIdleTime", 60L)).thenReturn(60L);
-        when(props.getLongProperty("maxWaitTime", 60L)).thenReturn(60L);
+        when(props.getLongProperty("maxWaitTime", 5L)).thenReturn(5L);
         when(props.getProperty("clusteringPolicy")).thenReturn(null); // default -> NON_CLUSTERED
 
         BrowseContext ctx = mock(BrowseContext.class);
@@ -68,8 +68,8 @@ public class RedisConnectionConfigTest {
     @Test
     public void testConnectionTimeoutConvertedToMilliseconds() {
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhost:6379"));
-        assertEquals(30 * 1000, config.getConnectionTimeout());
-        assertEquals(30 * 1000, config.getSocketTimeout());
+        assertEquals(5 * 1000, config.getConnectionTimeout());
+        assertEquals(5 * 1000, config.getSocketTimeout());
     }
 
     @Test
@@ -94,8 +94,8 @@ public class RedisConnectionConfigTest {
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getBooleanProperty("useSSL")).thenReturn(false);
         when(props.getBooleanProperty("poolEnabled")).thenReturn(true);
-        when(props.getLongProperty("connectionTimeout", 30L)).thenReturn(30L);
-        when(props.getLongProperty("socketTimeout", 30L)).thenReturn(30L);
+        when(props.getLongProperty("connectionTimeout", 5L)).thenReturn(5L);
+        when(props.getLongProperty("socketTimeout", 5L)).thenReturn(5L);
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getProperty("user")).thenReturn(null);
         when(props.getProperty("password")).thenReturn(null);
@@ -103,7 +103,7 @@ public class RedisConnectionConfigTest {
         when(props.getLongProperty("poolSize", 4L)).thenReturn(8L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(2L);
         when(props.getLongProperty("maxIdleTime", 60L)).thenReturn(60L);
-        when(props.getLongProperty("maxWaitTime", 60L)).thenReturn(60L);
+        when(props.getLongProperty("maxWaitTime", 5L)).thenReturn(5L);
 
         BrowseContext ctx = mock(BrowseContext.class);
         when(ctx.getConnectionProperties()).thenReturn(props);

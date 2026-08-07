@@ -24,7 +24,7 @@ tasks.named('connectorConfig').configure {
 
 archivesBaseName = 'BoomiRedisConnector'
 group = 'com.boomi.connector.redis'
-version = '0.91'
+version = '1.0.0'
 
 ext {
     sdkBoomiVersion = '2.22.1'

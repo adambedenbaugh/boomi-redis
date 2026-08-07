@@ -1,6 +1,18 @@
 # Boomi Redis Connector
 
+![](docs/assets/redis-connector.png)
+
 A Boomi custom connector for Redis that enables high-throughput caching operations from Boomi integration processes and APIs. Supports standalone Redis, pooled standalone Redis, and Redis Cluster deployments — including Azure Cache for Redis with Microsoft Entra authentication.
+
+## Documentation
+
+This README is a quick-start overview. For the full technical documentation, see the **[technical docs](docs/README.md)** that links to:
+
+- **[Getting Started](docs/getting-started.md)** — develop, build, and test the connector from a fresh clone to uploadable artifacts.
+- **[Connection Configuration](docs/connection-configuration.md)** — every connection field, the clustering policies, and the three authentication modes.
+- **[Operation Configuration](docs/operation-configuration.md)** — the GET / UPSERT / DELETE operations, their properties, and JSON request/response profiles.
+- **[Deploying connector to the Boomi Platform](https://developer.boomi.com/docs/Connectors/DeployConnectors/Versioning_and_releasing_connector)** — Boomi's official documentation on deploying a connector to Boomi Integration.
+- **[Updating the Connector Icon](docs/updating-connector-icon.md)** — how to update the connector's icon.
 
 ## Features
 
