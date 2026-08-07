@@ -53,6 +53,9 @@ src/test/**/*.properties
 # Superpowers scratch workspace (subagent ledgers/reports)
 .superpowers/
 
+# Superpowers plans/specs (kept on disk, purged from git history)
+docs/superpowers/
+
 # Local Claude Code settings (kept on disk, purged from git history)
 .claude/
 
