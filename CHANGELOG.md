@@ -1,4 +1,4 @@
-# Change Log
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -12,7 +12,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Added Microsoft Entra authentication support.
 - Added support for Azure Cache for Redis and Azure Managed Redis.
 
-## Changed
+### Changed
 - BREAKING CHANGE: Supports JSON request and response profiles.
 - BREAKING CHANGE: Removed support for setting Dynamic Process Properties.
 
