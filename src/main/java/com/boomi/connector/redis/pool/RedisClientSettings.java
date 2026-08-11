@@ -122,10 +122,15 @@ public final class RedisClientSettings {
                 maxIdleTime, maxWaitTime);
     }
 
-    /** Redacting: identifies the client without exposing credentials. Safe to log. */
+    /**
+     * Redacting: identifies the client without exposing credentials. Safe to log.
+     * {@code connectionId} is deliberately omitted - the Atom runtime never supplies it, so it
+     * would render as a confusing {@code connectionId=''} in every pool log line. (It still
+     * participates in {@link #equals}/{@link #hashCode}.)
+     */
     @Override
     public String toString() {
-        return "RedisClientSettings{connectionId='" + connectionId + "', hosts='" + hosts
+        return "RedisClientSettings{hosts='" + hosts
                 + "', clusteringPolicy=" + clusteringPolicy + ", authenticationType=" + authenticationType
                 + ", poolEnabled=" + poolEnabled + "}";
     }
