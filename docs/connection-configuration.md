@@ -84,6 +84,10 @@ from the pool before failing. Applies only when pooling is enabled. Default is
 > - **Disabled** — a private, single-use cluster client is built fresh for each
 >   execution and torn down immediately after, so its per-node pool only ever
 >   needs one connection.
+> - **Idle cleanup** — a shared pool or cluster client that no execution has used for
+>   30 minutes is closed automatically and rebuilt on next use. Changing any connection
+>   value (including credentials) starts a fresh pool immediately; the superseded pool
+>   is cleaned up the same way.
 
 ## Clustering policy
 
