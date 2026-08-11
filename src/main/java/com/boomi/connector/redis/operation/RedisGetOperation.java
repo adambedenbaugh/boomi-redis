@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.logging.Logger;
 
+import com.boomi.connector.api.ConnectorException;
 import com.boomi.connector.api.GetRequest;
 import com.boomi.connector.api.ObjectIdData;
 import com.boomi.connector.api.OperationContext;
@@ -57,8 +58,12 @@ public class RedisGetOperation extends BaseGetOperation {
 		RedisConnection redisConnection = new RedisConnection(getContext());
 
 		try {
-			redisConnection.init();
 			String objectId = input.getObjectId();
+			if (objectId == null || objectId.isEmpty()) {
+				throw new ConnectorException("The GET operation received an empty id (key). "
+						+ "Provide a key, or '*' to get all keys with the configured prefix.");
+			}
+			redisConnection.init();
 
 			if (!WILDCARD_OBJECT_ID.equals(objectId)) {
 				handleSingleGet(objectId, redisConnection, response, input, logger,

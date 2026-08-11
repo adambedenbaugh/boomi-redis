@@ -128,4 +128,23 @@ public class RedisDeleteOperationTest {
             verify(mocked.constructed().get(0)).close();
         }
     }
+
+    @Test
+    public void testEmptyObjectIdFailsThatDocumentOnlyAndBatchContinues() throws Exception {
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            List<SimpleOperationResult> results =
+                    tester.executeDeleteOperation(Arrays.asList("", "realkey"));
+
+            assertEquals(2, results.size());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            assertTrue("failure message must explain the empty id, got: " + results.get(0).getMessage(),
+                    results.get(0).getMessage().toLowerCase().contains("empty id"));
+            assertEquals("the rest of the batch must still be processed",
+                    OperationStatus.SUCCESS, results.get(1).getStatus());
+            verify(mocked.constructed().get(0)).del("prefix:realkey");
+            // The empty id must never reach Redis as the bare prefix key.
+            verify(mocked.constructed().get(0), never()).del("prefix:");
+        }
+    }
 }

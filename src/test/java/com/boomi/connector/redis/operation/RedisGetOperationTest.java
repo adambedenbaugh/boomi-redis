@@ -170,4 +170,20 @@ public class RedisGetOperationTest {
             verify(mocked.constructed().get(0)).close();
         }
     }
+
+    @Test
+    public void testEmptyObjectIdFailsWithDescriptiveErrorWithoutTouchingRedis() throws Exception {
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            List<SimpleOperationResult> results = tester.executeGetOperation("");
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            assertTrue("failure message must explain the empty id, got: " + results.get(0).getMessage(),
+                    results.get(0).getMessage().toLowerCase().contains("empty id"));
+            // Validation happens before init(), so a doomed request never opens a connection.
+            verify(mocked.constructed().get(0), never()).init();
+            verify(mocked.constructed().get(0), never()).get(anyString());
+        }
+    }
 }

@@ -3,6 +3,7 @@ package com.boomi.connector.redis.operation;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.boomi.connector.api.ConnectorException;
 import com.boomi.connector.api.DeleteRequest;
 import com.boomi.connector.api.ObjectIdData;
 import com.boomi.connector.api.OperationContext;
@@ -36,6 +37,10 @@ public class RedisDeleteOperation extends BaseDeleteOperation {
 			for (ObjectIdData input : request) {
 				try {
 					String objectId = input.getObjectId();
+					if (objectId == null || objectId.isEmpty()) {
+						throw new ConnectorException("The DELETE operation received an empty id (key). "
+								+ "Provide a key, or '*' to delete all keys with the configured prefix.");
+					}
 					if ("*".equals(objectId)) {
 						logger.fine("Found wildcard objectId - executing batch delete");
 						delete(redisConnection, keyPrefix);
