@@ -5,6 +5,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
 
 import com.google.gson.JsonElement;
@@ -17,7 +18,7 @@ public class RedisUtils {
 	 * Utility to convert InputStream to String
 	 */
 	public static String inputStreamToString(InputStream is) throws IOException {
-		try (BufferedReader buffer = new BufferedReader(new InputStreamReader(is))) {
+		try (BufferedReader buffer = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
 			return buffer.lines().collect(Collectors.joining("\n"));
 		}
 	}
@@ -26,7 +27,26 @@ public class RedisUtils {
 	 * Utility to convert String to InputStream
 	 */
 	public static InputStream stringToInputStream(String str) throws IOException {
-		return new ByteArrayInputStream(str.getBytes());
+		return new ByteArrayInputStream(str.getBytes(StandardCharsets.UTF_8));
+	}
+
+	/**
+	 * Escapes SCAN/KEYS glob metacharacters (\, *, ?, [, ]) in a literal string so it can be safely
+	 * combined with an appended wildcard without changing which keys the pattern matches.
+	 */
+	public static String escapeGlobMetacharacters(String literal) {
+		if (literal == null) {
+			return null;
+		}
+		StringBuilder escaped = new StringBuilder(literal.length());
+		for (int i = 0; i < literal.length(); i++) {
+			char c = literal.charAt(i);
+			if (c == '\\' || c == '*' || c == '?' || c == '[' || c == ']') {
+				escaped.append('\\');
+			}
+			escaped.append(c);
+		}
+		return escaped.toString();
 	}
 
 	/**

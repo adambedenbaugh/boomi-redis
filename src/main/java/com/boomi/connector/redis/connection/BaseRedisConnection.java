@@ -2,6 +2,7 @@ package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.redis.authentication.AuthenticationType;
 import com.boomi.connector.redis.authentication.BoomiRedisCredentialsProvider;
+import com.boomi.connector.redis.util.RedisUtils;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.*;
 
@@ -109,9 +110,11 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
             return "*";
         }
 
-        // If no wildcards present, add * to find keys with this prefix
+        // If no wildcards present, this is a literal prefix: escape any glob metacharacters it
+        // contains (e.g. a key prefix like "cache[1]:") before appending * to find keys with this
+        // prefix, so the pattern only ever matches more broadly on purpose, never by accident.
         if (!pattern.contains("*") && !pattern.contains("?")) {
-            return pattern + "*";
+            return RedisUtils.escapeGlobMetacharacters(pattern) + "*";
         }
 
         return pattern;
