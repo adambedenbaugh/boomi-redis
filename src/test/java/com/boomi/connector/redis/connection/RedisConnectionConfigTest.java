@@ -14,8 +14,8 @@ public class RedisConnectionConfigTest {
     private BrowseContext contextWith(String hosts) {
         PropertyMap props = mock(PropertyMap.class);
         when(props.getProperty("hosts")).thenReturn(hosts);
-        when(props.getBooleanProperty("useSSL")).thenReturn(false);
-        when(props.getBooleanProperty("poolEnabled")).thenReturn(false);
+        when(props.getBooleanProperty("useSSL", Boolean.FALSE)).thenReturn(false);
+        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(false);
         when(props.getLongProperty("connectionTimeout", 5L)).thenReturn(5L);
         when(props.getLongProperty("socketTimeout", 5L)).thenReturn(5L);
         when(props.getProperty("authenticationType")).thenReturn("None");
@@ -92,8 +92,8 @@ public class RedisConnectionConfigTest {
     public void testPoolSizeReadFromPropertyWhenPoolEnabled() {
         PropertyMap props = mock(PropertyMap.class);
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
-        when(props.getBooleanProperty("useSSL")).thenReturn(false);
-        when(props.getBooleanProperty("poolEnabled")).thenReturn(true);
+        when(props.getBooleanProperty("useSSL", Boolean.FALSE)).thenReturn(false);
+        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
         when(props.getLongProperty("connectionTimeout", 5L)).thenReturn(5L);
         when(props.getLongProperty("socketTimeout", 5L)).thenReturn(5L);
         when(props.getProperty("authenticationType")).thenReturn("None");
@@ -134,7 +134,7 @@ public class RedisConnectionConfigTest {
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getProperty("clusteringPolicy")).thenReturn("OSSClustered");
-        when(props.getBooleanProperty("poolEnabled")).thenReturn(true);
+        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
         when(props.getLongProperty("poolSize", 4L)).thenReturn(6L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
         BrowseContext ctx = mock(BrowseContext.class);

@@ -41,7 +41,7 @@ public class RedisConnectionFactoryTest {
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getProperty("clusteringPolicy")).thenReturn(policy);
-        when(props.getBooleanProperty("poolEnabled")).thenReturn(poolEnabled);
+        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(poolEnabled);
         when(props.getLongProperty("poolSize", 4L)).thenReturn(4L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
         BrowseContext ctx = mock(BrowseContext.class);

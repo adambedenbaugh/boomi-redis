@@ -47,8 +47,8 @@ public class RedisConnectionConfig {
             throw new IllegalArgumentException("Host is empty");
         }
         
-        this.useSSL = propertiesMap.getBooleanProperty("useSSL");
-        this.poolEnabled = propertiesMap.getBooleanProperty("poolEnabled");
+        this.useSSL = propertiesMap.getBooleanProperty("useSSL", Boolean.FALSE);
+        this.poolEnabled = propertiesMap.getBooleanProperty("poolEnabled", Boolean.FALSE);
         
         // Parse timeout configurations - convert seconds to milliseconds
         this.connectionTimeout = propertiesMap.getLongProperty("connectionTimeout", 5L).intValue() * 1000;
@@ -105,27 +105,37 @@ public class RedisConnectionConfig {
         if (parts.length != 2) {
             throw new IllegalArgumentException("Invalid Redis Host: " + hosts + ". Syntax is <host>:<port>");
         }
-        return Integer.parseInt(parts[1]);
+        return parsePort(parts[1], hosts);
     }
-    
+
     /**
      * Parses cluster nodes from the hosts configuration.
      */
     public Set<HostAndPort> getClusterNodes() {
         String[] pairs = hosts.split(",");
         Set<HostAndPort> nodes = new HashSet<>();
-        
+
         for (String pair : pairs) {
             String[] hostPort = pair.trim().split(":");
             if (hostPort.length != 2) {
                 throw new IllegalArgumentException("Invalid cluster node: " + pair + ". Syntax is <host>:<port>");
             }
-            nodes.add(new HostAndPort(hostPort[0], Integer.parseInt(hostPort[1])));
+            nodes.add(new HostAndPort(hostPort[0], parsePort(hostPort[1], pair)));
         }
-        
+
         return nodes;
     }
-    
+
+    /** Parses a port number, naming the offending value and its source in the error on failure. */
+    private static int parsePort(String portValue, String source) {
+        try {
+            return Integer.parseInt(portValue);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid port '" + portValue + "' in Hosts value '" + source
+                    + "'. The port must be an integer.", e);
+        }
+    }
+
     /**
      * Stable identity for pool keying. Includes the stable credential material so that changing
      * credentials produces a different key — a new pool bound to the new credentials — while the
@@ -135,7 +145,7 @@ public class RedisConnectionConfig {
      * URL. Consequently, editing the OAuth 2.0 component's client secret or token URL (e.g. fixing a
      * bad secret, or switching Azure Commercial -> Government) causes every new connection/execution
      * to build and use a pool for the new credentials instead of reusing a stale one. The client
-     * secret is hashed (never emitted verbatim) because the pool key is logged. Basic auth keys on
+     * secret is hashed so the key never contains secret material verbatim; Basic auth keys on
      * username + password hash for the same reason.
      */
     public String getAuthIdentity() {
