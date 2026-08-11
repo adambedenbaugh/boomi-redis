@@ -17,8 +17,8 @@ import java.util.logging.Logger;
 /**
  * Redis client implementation for standalone (single-node) Redis instances with connection pooling.
  * The shared {@link JedisPool} is owned by {@link RedisClientPoolManager}, keyed by the full
- * connection identity ({@link RedisClientSettings}: component id + every connection field), reused
- * across executions, and closed by the manager's idle eviction - never by this class.
+ * connection identity ({@link RedisClientSettings}: every connection field), reused across
+ * executions, and closed by the manager's idle eviction - never by this class.
  */
 public class StandalonePooledRedisConnection extends BaseRedisConnection {
 

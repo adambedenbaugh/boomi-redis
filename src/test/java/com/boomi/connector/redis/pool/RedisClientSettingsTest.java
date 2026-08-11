@@ -63,8 +63,11 @@ public class RedisClientSettingsTest {
 
     @Test
     public void differentConnectionIdsAreNotEqual() {
-        // The user-facing contract: two connection components pointing at the same Redis are
-        // two distinct pools.
+        // Best-effort: connectionId participates in equality WHEN supplied, so id-based isolation
+        // activates automatically if a future runtime provides the id. Today's Atom runtime
+        // injects no "id" connection property (verified 2026-08-11), so in production the id is
+        // always "" and identity is effectively the connection's field values only - the same
+        // keying Boomi's official JMS V2 connector uses.
         PropertyMap other = baseProps();
         when(other.getProperty("id")).thenReturn("component-2");
         assertNotEquals(settings(baseProps()), settings(other));

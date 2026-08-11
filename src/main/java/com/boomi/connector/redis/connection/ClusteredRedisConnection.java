@@ -16,8 +16,8 @@ import java.util.logging.Logger;
  * Uses JedisCluster which handles connection pooling and cluster topology management internally.
  *
  * <p>When pooling is enabled, the {@code JedisCluster} client (and its internal per-node pools) is
- * owned by {@link RedisClientPoolManager}, keyed by {@link RedisClientSettings} (component id plus
- * every connection field), shared and reused across executions - so repeated executions against
+ * owned by {@link RedisClientPoolManager}, keyed by {@link RedisClientSettings} (every connection
+ * field), shared and reused across executions - so repeated executions against
  * the same connection configuration skip topology re-discovery and reuse warm per-node connections
  * instead of paying for a fresh one every time. It is closed only by the manager's idle eviction or
  * {@link RedisClientPoolManager#closeAll()} - never by this class. When pooling is disabled, a

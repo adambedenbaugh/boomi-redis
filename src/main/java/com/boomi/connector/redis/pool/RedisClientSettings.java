@@ -12,14 +12,18 @@ import java.util.Objects;
  * {@link RedisClientPoolManager}'s shared-client map. Modeled on the official Boomi JMS V2
  * connector's {@code AdapterSettings}.
  *
- * <p>Two instances are equal when the connection component id AND every connection field match.
- * Consequences:
+ * <p>Two instances are equal when every connection field matches (value equality - the same keying
+ * the JMS V2 connector uses). Consequences:
  * <ul>
- *   <li>Two different connection components pointing at the same Redis endpoint are two different
- *       keys - two independent pools - because their component ids differ.</li>
  *   <li>Changing any connection field (credentials, timeouts, pool sizing, topology) produces a
  *       new key, so the next execution builds a client with the new values; the superseded client
  *       idles out via {@link RedisClientPoolManager}'s eviction.</li>
+ *   <li>Two connection components with byte-identical settings share one client. This is benign
+ *       (identical settings means the same endpoint and the same credentials) and matches the JMS
+ *       V2 behavior. A best-effort {@code connectionId} participates in equality, but the Atom
+ *       runtime supplies no component id (verified 2026-08-11 - see
+ *       {@link RedisConnectionConfig#getConnectionId()}), so it is "" in production; per-component
+ *       isolation activates automatically if a future runtime ever provides the id.</li>
  *   <li>The rotating Entra access token is deliberately NOT part of the identity - only the stable
  *       OAuth fields (client id, client secret, token URL) are - so token refresh keeps reusing
  *       the same pool.</li>
