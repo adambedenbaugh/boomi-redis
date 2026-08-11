@@ -120,15 +120,6 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         return pattern;
     }
 
-    /**
-     * Tests the connection. Subclasses can override this method if they want to use retry logic.
-     * Default implementation returns true (assumes connection is valid).
-     * @return true if connection is valid, false otherwise
-     */
-    protected boolean testConnection() {
-        return true;
-    }
-
     @Override
     public boolean isValid() {
         return true;

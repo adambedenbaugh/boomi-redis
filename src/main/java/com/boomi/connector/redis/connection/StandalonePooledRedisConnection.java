@@ -15,10 +15,16 @@ import java.util.logging.Logger;
 
 /**
  * Redis client implementation for standalone (single-node) Redis instances with connection pooling.
- * Uses a JedisPool to manage connections efficiently for concurrent operations.
+ * Uses a JedisPool to manage connections efficiently across many operation executions.
  * Pools are shared by a token-free identity key (host/port/ssl/timeout/pool-size/auth-identity) so
  * that a rotating Entra token never orphans a pool. Access to a given pool key is serialized via a
  * per-key lock so unrelated pool keys never contend with each other.
+ *
+ * <p>A shared pool outlives any single instance: {@link #close()} releases only this instance's
+ * handle to it (and updates the diagnostic active-reference count), it never tears down the pool
+ * itself, so the next execution against the same connection configuration reuses warm connections
+ * instead of paying a fresh connect/AUTH/TLS handshake. Pools are only actually closed via
+ * {@link #closeAllSharedPools()}.
  */
 public class StandalonePooledRedisConnection extends BaseRedisConnection {
 
@@ -33,14 +39,17 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
     private String poolKey;
 
     /**
-     * Helper class to track pool instances and reference counts
+     * Helper class to track pool instances, their endpoint, and reference counts
      */
     private static class PoolInfo {
         final JedisPool pool;
+        /** host:port this pool connects to; used to evict superseded pools for the same endpoint. */
+        final String endpoint;
         final AtomicInteger referenceCount;
 
-        PoolInfo(JedisPool pool) {
+        PoolInfo(JedisPool pool, String endpoint) {
             this.pool = pool;
+            this.endpoint = endpoint;
             this.referenceCount = new AtomicInteger(1);
         }
 
@@ -68,15 +77,22 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
     }
 
     /**
-     * Generates a unique, token-free key for the pool based on connection configuration.
+     * Generates a unique, token-free key for the pool based on connection configuration. Every
+     * configuration value that is baked into the pool or its client config must appear here -
+     * otherwise changing that field in Boomi would silently keep using a pool built with the old
+     * value (pools are never closed by instances, so there is no eventual pickup).
      */
     private String generatePoolKey(RedisConnectionConfig config) {
         return new StringBuilder()
                 .append(config.getHost()).append(":")
                 .append(config.getPort()).append(":")
                 .append(config.isSSLEnabled()).append(":")
+                .append(config.getConnectionTimeout()).append(":")
                 .append(config.getSocketTimeout()).append(":")
                 .append(config.getPoolSize()).append(":")
+                .append(config.getMinPoolSize()).append(":")
+                .append(config.getMaxIdleTime()).append(":")
+                .append(config.getMaxWaitTime()).append(":")
                 .append(config.getAuthIdentity())
                 .toString();
     }
@@ -88,17 +104,27 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
      * is guarded by testOnBorrow rather than an eager ping here.
      */
     private void initializePool() {
+        boolean created = false;
         Object lock = poolLocks.computeIfAbsent(poolKey, k -> new Object());
         synchronized (lock) {
             PoolInfo existing = sharedPools.get(poolKey);
             if (existing != null && !existing.pool.isClosed()) {
                 existing.incrementReference();
                 jedisPool = existing.pool;
-                logger.info("Reusing existing shared pool (references: " + existing.getReferenceCount() + ")");
-                return;
+            } else {
+                createNewSharedPool();
+                created = true;
             }
-            createNewSharedPool();
         }
+        if (created) {
+            // Outside the new key's lock (never hold two per-key locks at once - that could
+            // deadlock two concurrent creations evicting each other's endpoint).
+            evictSupersededPools(endpoint(), poolKey);
+        }
+    }
+
+    private String endpoint() {
+        return config.getHost() + ":" + config.getPort();
     }
 
     /**
@@ -107,35 +133,53 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
     private void createNewSharedPool() {
         HostAndPort node = new HostAndPort(config.getHost(), config.getPort());
         JedisPool newPool = clientFactory.createPool(createJedisPoolConfig(), node, buildClientConfig());
-        sharedPools.put(poolKey, new PoolInfo(newPool));
+        sharedPools.put(poolKey, new PoolInfo(newPool, endpoint()));
         jedisPool = newPool;
 
         logger.info("Created new shared Redis connection pool to " + node
-                + " with pool size: " + config.getPoolSize() + " (pool key: " + poolKey + ")");
+                + " with pool size: " + config.getPoolSize());
     }
 
     /**
-     * Tests the connection pool by attempting to ping Redis.
-     * @return true if connection is valid, false otherwise
+     * Closes and removes pools for the same endpoint registered under a different (superseded)
+     * key - e.g. after a credential rotation or a pool-setting change produced a new key. Without
+     * this, the old pool would sit in the map forever with its evictor keeping minIdle connections
+     * alive (and, once the old credential is revoked server-side, re-attempting AUTH with dead
+     * credentials every eviction run). Entries still referenced by an in-flight execution are
+     * skipped; the next pool creation sweeps again.
+     *
+     * <p>Trade-off: two deliberately different connection configurations targeting the same
+     * endpoint (e.g. two ACL users) will evict each other's idle pools and degrade to a pool
+     * rebuild per execution - correct, just unpooled. That rare case is accepted in exchange for
+     * cleaning up the common one (a credential/setting change leaving a permanently stale pool).
      */
-    @Override
-    protected boolean testConnection() {
-        if (jedisPool == null) {
-            return false;
-        }
-
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.ping();
-            return true;
-        } catch (Exception e) {
-            logger.warning("Connection pool test failed: " + e.getMessage());
-            return false;
+    private static void evictSupersededPools(String endpoint, String currentKey) {
+        for (Map.Entry<String, PoolInfo> entry : sharedPools.entrySet()) {
+            String key = entry.getKey();
+            if (key.equals(currentKey) || !endpoint.equals(entry.getValue().endpoint)) {
+                continue;
+            }
+            Object lock = poolLocks.computeIfAbsent(key, k -> new Object());
+            synchronized (lock) {
+                PoolInfo candidate = sharedPools.get(key);
+                // Re-check under the candidate's lock: acquires increment under this same lock,
+                // so refcount 0 here means no live instance holds the pool.
+                if (candidate != null && endpoint.equals(candidate.endpoint)
+                        && candidate.getReferenceCount() == 0) {
+                    sharedPools.remove(key);
+                    try {
+                        candidate.pool.close();
+                        logger.info("Closed superseded Redis connection pool for " + endpoint);
+                    } catch (Exception e) {
+                        logger.warning("Error closing superseded pool for " + endpoint + ": " + e.getMessage());
+                    }
+                }
+            }
         }
     }
 
     @Override
     public String get(String key) {
-        testConnection();
         try (Jedis jedis = jedisPool.getResource()) {
             return jedis.get(key);
         } catch (Exception e) {
@@ -148,10 +192,10 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
     public void set(String key, String value, Long ttl) {
         try (Jedis jedis = jedisPool.getResource()) {
             if (ttl != null && ttl != -1) {
-                logger.info("Setting key with TTL: " + key + " and value: " + value + " TTL: " + ttl);
+                logger.fine("Setting key with TTL: " + key + " TTL: " + ttl);
                 jedis.psetex(key, ttl, value);
             } else {
-                logger.info("Setting key without TTL: " + key + " and value: " + value);
+                logger.fine("Setting key without TTL: " + key);
                 jedis.set(key, value);
             }
         } catch (Exception e) {
@@ -207,16 +251,12 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
             String cursor = ScanParams.SCAN_POINTER_START;
             List<String> allKeys = new ArrayList<>();
 
-            logger.info("Scanning with pattern: " + scanPattern);
-
             do {
                 ScanResult<String> scanResult = jedis.scan(cursor, scanParams);
                 List<String> foundKeys = scanResult.getResult();
                 allKeys.addAll(foundKeys);
                 cursor = scanResult.getCursor();
             } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
-
-            logger.info("Total keys found: " + allKeys.size());
 
             if (!allKeys.isEmpty()) {
                 Pipeline pipeline = jedis.pipelined();
@@ -255,27 +295,22 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
         }
     }
 
+    /**
+     * Releases this instance's handle to the shared pool. The pool itself is a long-lived resource
+     * meant to be reused across many operation executions (that is the point of enabling pooling), so
+     * this deliberately does NOT close or remove it from {@link #sharedPools} - only
+     * {@link #closeAllSharedPools()} does that. This only updates the diagnostic active-reference
+     * count, guarding against acting on a pool this instance no longer actually holds (e.g. if
+     * {@link #closeAllSharedPools()} ran and a new pool was registered under the same key since this
+     * instance was constructed).
+     */
     @Override
     public void close() {
         if (jedisPool != null && poolKey != null) {
-            Object lock = poolLocks.computeIfAbsent(poolKey, k -> new Object());
-            synchronized (lock) {
-                PoolInfo poolInfo = sharedPools.get(poolKey);
-                if (poolInfo != null) {
-                    int remaining = poolInfo.decrementReference();
-                    logger.info("Released pool reference (remaining: " + remaining + ")");
-
-                    if (remaining <= 0) {
-                        // Last reference, close the pool
-                        sharedPools.remove(poolKey);
-                        try {
-                            poolInfo.pool.close();
-                            logger.info("Closed shared Redis connection pool (no more references)");
-                        } catch (Exception e) {
-                            logger.warning("Error closing shared Redis connection pool: " + e.getMessage());
-                        }
-                    }
-                }
+            PoolInfo poolInfo = sharedPools.get(poolKey);
+            if (poolInfo != null && poolInfo.pool == jedisPool) {
+                int remaining = poolInfo.decrementReference();
+                logger.fine("Released pool reference (active: " + remaining + ")");
             }
             jedisPool = null;
             poolKey = null;
@@ -283,7 +318,12 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
     }
 
     /**
-     * Closes all shared pools. Should be called during application shutdown.
+     * Closes all shared pools. Should be called during application shutdown or test teardown.
+     * Contract: callers must be effectively single-threaded (no concurrent pool acquisition) -
+     * this method deliberately does not take the per-key locks, so a racing acquire could register
+     * a pool that the trailing clear() orphans, and clearing poolLocks lets two threads briefly
+     * hold different lock objects for one key. Both are acceptable only because shutdown and
+     * sequential test fixtures are the only callers.
      */
     public static void closeAllSharedPools() {
         for (Map.Entry<String, PoolInfo> entry : sharedPools.entrySet()) {
