@@ -3,7 +3,6 @@ plugins {
     id 'base'
     id 'com.boomi.connector' version '0.3.4'
     id 'java-library'
-    id 'jvm-test-suite'
     id 'com.github.ben-manes.versions' version '0.52.0'
 }
 
@@ -22,9 +21,11 @@ tasks.named('connectorConfig').configure {
     }
 }
 
-archivesBaseName = 'BoomiRedisConnector'
+base {
+    archivesName = 'BoomiRedisConnector'
+}
 group = 'com.boomi.connector.redis'
-version = '1.0.0'
+version = '1.0.1'
 
 ext {
     sdkBoomiVersion = '2.22.1'
@@ -33,16 +34,18 @@ ext {
 compileTestJava.dependsOn connectorConfig
 compileTestJava.dependsOn connectorOverridesFile
 
+java {
     sourceCompatibility = '1.8'
     targetCompatibility = '1.8'
+}
 
-    repositories {
-        mavenCentral()
-        maven {
-            name = "Connector SDK Repository"
-            url = "https://boomisdk.s3.amazonaws.com/releases"
-        }
+repositories {
+    mavenCentral()
+    maven {
+        name = "Connector SDK Repository"
+        url = "https://boomisdk.s3.amazonaws.com/releases"
     }
+}
 
 dependencies {
     api group: 'com.boomi.connsdk', name: 'connector-sdk-api', version: sdkBoomiVersion
@@ -60,76 +63,62 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.21.4'
 }
 
-    test {
-        useJUnit {
-            excludeCategories 'com.boomi.connector.redis.IntegrationTest'
-        }
-        testLogging {
-            showStandardStreams = true
-            events "passed", "skipped", "failed"
-            exceptionFormat "full"
-            showExceptions true
-            showCauses true
-            showStackTraces true
-        }
-        jvmArgs = []
+test {
+    useJUnit {
+        excludeCategories 'com.boomi.connector.redis.IntegrationTest'
     }
-
-    task integrationTest(type: Test) {
-        useJUnit {
-            includeCategories 'com.boomi.connector.redis.IntegrationTest'
-        }
-        testLogging {
-            showStandardStreams = true
-            events "passed", "skipped", "failed"
-            exceptionFormat "full"
-            showExceptions true
-            showCauses true
-            showStackTraces true
-        }
-        description = 'Run integration tests (requires a live Redis or Azure Redis instance)'
-        group = 'verification'
-        classpath = sourceSets.test.runtimeClasspath
-        testClassesDirs = sourceSets.test.output.classesDirs
+    testLogging {
+        showStandardStreams = true
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
     }
+    jvmArgs = []
+}
 
-    jar {
-        archiveBaseName = archivesBaseName
+task integrationTest(type: Test) {
+    useJUnit {
+        includeCategories 'com.boomi.connector.redis.IntegrationTest'
     }
-
-    connectorArchive {
-        archiveBaseName = archivesBaseName
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        
-        into('/lib') {
-            from configurations.runtimeClasspath
-            from 'lib' 
-        }
-        
-    }    
-
-    task copyUploadArtifacts(type: Copy) {
-        destinationDir = file("$buildDir/connector-upload")
-        from connectorArchive
-        from fileTree("src/main/resources/META-INF").files, {
-            include "connector-descriptor.xml"
-            include "connector-config.xml"
-        }
-        //from fileTree("src/main/resources/schemas").files
+    testLogging {
+        showStandardStreams = true
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
     }
+    description = 'Run integration tests (requires a live Redis or Azure Redis instance)'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    testClassesDirs = sourceSets.test.output.classesDirs
+}
 
-    task runEntraAuthTest(type: JavaExec) {
-        description = 'Run the CacheConnectorEntraAuthGetTest'
-        group = 'verification'
-        classpath = sourceSets.test.runtimeClasspath
-        mainClass = 'com.boomi.connector.redis.CacheConnectorEntraAuthGetTest'
-        dependsOn compileTestJava
-        
-        // Enable debugging when --debug-jvm flag is used
-        if (project.hasProperty('debug')) {
-            debug = true
-        }
+jar {
+    archiveBaseName = base.archivesName
+}
+
+connectorArchive {
+    archiveBaseName = base.archivesName
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    into('/lib') {
+        from configurations.runtimeClasspath
+        from 'lib'
     }
+}
 
-    build.dependsOn copyUploadArtifacts    
+task copyUploadArtifacts(type: Copy) {
+    destinationDir = file("$buildDir/connector-upload")
+    from connectorArchive
+    from fileTree("src/main/resources/META-INF").files, {
+        include "connector-descriptor.xml"
+        include "connector-config.xml"
+    }
+    //from fileTree("src/main/resources/schemas").files
+}
+
+build.dependsOn copyUploadArtifacts
 
