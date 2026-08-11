@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -134,7 +135,7 @@ public final class RedisClientPoolManager {
                         ACTIVE_CLIENTS.remove(entry.getKey(), managed);
                     }
                 } catch (Exception e) {
-                    LOG.severe("Unable to evict Redis client for " + entry.getKey() + ": " + e.getMessage());
+                    LOG.log(Level.SEVERE, "Unable to evict Redis client for " + entry.getKey(), e);
                 }
             }
         }
