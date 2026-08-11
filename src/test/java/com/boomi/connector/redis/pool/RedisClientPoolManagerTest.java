@@ -39,6 +39,21 @@ public class RedisClientPoolManagerTest {
         return new RedisClientSettings(new RedisConnectionConfig(ctx));
     }
 
+    private static RedisClientSettings settingsWithPassword(String componentId, String password) {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("id")).thenReturn(componentId);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("Basic");
+        when(props.getProperty("user")).thenReturn("alice");
+        when(props.getProperty("password")).thenReturn(password);
+        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
+        when(props.getLongProperty("poolSize", 4L)).thenReturn(4L);
+        when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        return new RedisClientSettings(new RedisConnectionConfig(ctx));
+    }
+
     @Test
     public void acquireBuildsOnceAndReusesForEqualSettings() {
         Closeable client = mock(Closeable.class);
@@ -190,5 +205,83 @@ public class RedisClientPoolManagerTest {
         assertSame("acquire() after eviction must rebuild with a fresh client", client2, acquired2);
         assertSame("acquire() after eviction must reuse the very same lock object",
                 lockBeforeEviction, RedisClientPoolManager.getLockObject(settings));
+    }
+
+    @Test
+    public void evictionClosesAndRemovesExpiredIdleClients() throws Exception {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+        RedisClientPoolManager.release(settings("comp-1"), client);
+
+        long lastUsed = System.currentTimeMillis();
+        long afterExpiry = lastUsed + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000;
+        RedisClientPoolManager.runEviction(afterExpiry);
+
+        verify(client).close();
+        assertEquals(0, RedisClientPoolManager.getActiveClientCount());
+    }
+
+    @Test
+    public void evictionSkipsClientsWithActiveReferencesRegardlessOfAge() throws Exception {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+        // NOT released - an execution still holds it.
+
+        long farFuture = System.currentTimeMillis()
+                + (10 * RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS);
+        RedisClientPoolManager.runEviction(farFuture);
+
+        verify(client, never()).close();
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
+    }
+
+    @Test
+    public void evictionSkipsRecentlyUsedIdleClients() throws Exception {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+        RedisClientPoolManager.release(settings("comp-1"), client);
+
+        long justUnderExpiry = System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS - 60_000;
+        RedisClientPoolManager.runEviction(justUnderExpiry);
+
+        verify(client, never()).close();
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
+    }
+
+    @Test
+    public void supersededClientDiesOffAfterConfigChangeWhileNewClientLives() throws Exception {
+        // The credential-rotation scenario end to end: old settings' client goes idle, new
+        // settings' client is in active use; eviction reaps only the old one.
+        Closeable oldClient = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> oldClient);
+        RedisClientPoolManager.release(settings("comp-1"), oldClient);
+
+        RedisClientSettings rotated = settingsWithPassword("comp-1", "new-password");
+        Closeable newClient = mock(Closeable.class);
+        RedisClientPoolManager.acquire(rotated, () -> newClient);
+
+        long afterExpiry = System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000;
+        RedisClientPoolManager.runEviction(afterExpiry);
+
+        verify(oldClient).close();
+        verify(newClient, never()).close();
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
+    }
+
+    @Test
+    public void acquireAfterEvictionRebuildsTheClient() {
+        Closeable client1 = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client1);
+        RedisClientPoolManager.release(settings("comp-1"), client1);
+        RedisClientPoolManager.runEviction(System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000);
+
+        Closeable client2 = mock(Closeable.class);
+        Closeable acquired = RedisClientPoolManager.acquire(settings("comp-1"), () -> client2);
+
+        assertSame(client2, acquired);
+        assertEquals(1, RedisClientPoolManager.getActiveReferences(settings("comp-1")));
     }
 }
