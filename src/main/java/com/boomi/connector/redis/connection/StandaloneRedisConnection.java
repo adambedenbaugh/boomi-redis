@@ -31,7 +31,7 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
     private void initializeConnection() {
         HostAndPort node = new HostAndPort(config.getHost(), config.getPort());
         jedis = clientFactory.createClient(node, buildClientConfig());
-        logger.info("Initialized standalone Redis connection to " + node);
+        logger.fine("Initialized standalone Redis connection to " + node);
     }
     
     @Override
@@ -42,10 +42,10 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
     @Override
     public void set(String key, String value, Long ttl) {
         if (ttl != null && ttl != -1) {
-            logger.fine("Setting key with TTL: " + key + " and value: " + value + " TTL: " + ttl);
+            logger.fine("Setting key with TTL: " + key + " TTL: " + ttl);
             jedis.psetex(key, ttl, value);
         } else {
-            logger.fine("Setting key without TTL: " + key + " and value: " + value);
+            logger.fine("Setting key without TTL: " + key);
             jedis.set(key, value);
         }
     }
@@ -86,9 +86,7 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
         ScanParams scanParams = new ScanParams().match(scanPattern).count(1000);
         String cursor = ScanParams.SCAN_POINTER_START;
         List<String> allKeys = new ArrayList<>();
-        
-        logger.info("Scanning with pattern: " + scanPattern);
-        
+
         // Collect all matching keys using SCAN
         do {
             ScanResult<String> scanResult = jedis.scan(cursor, scanParams);
@@ -96,9 +94,7 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
             allKeys.addAll(foundKeys);
             cursor = scanResult.getCursor();
         } while (!cursor.equals(ScanParams.SCAN_POINTER_START));
-        
-        logger.info("Total keys found: " + allKeys.size());
-        
+
         // Get all values
         if (!allKeys.isEmpty()) {
             Pipeline pipeline = jedis.pipelined();

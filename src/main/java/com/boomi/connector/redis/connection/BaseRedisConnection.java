@@ -85,7 +85,13 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
         poolConfig.setNumTestsPerEvictionRun(3);
         poolConfig.setBlockWhenExhausted(true);
 
-        logger.info("Created Jedis Cluster Pool with size: " + maxTotal);
+        // INFO only for the shared (pooled) client, which is created rarely; the unpooled path
+        // builds a private client on every execution and would flood the container log at INFO.
+        if (config.isPoolEnabled()) {
+            logger.info("Created Jedis Cluster Pool with size: " + maxTotal);
+        } else {
+            logger.fine("Created Jedis Cluster Pool with size: " + maxTotal);
+        }
         return poolConfig;
     }
 

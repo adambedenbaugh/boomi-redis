@@ -1,7 +1,6 @@
 package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.api.BrowseContext;
-import java.util.logging.Logger;
 
 /**
  * Factory class for creating appropriate Redis connection implementations based on configuration.
@@ -9,9 +8,7 @@ import java.util.logging.Logger;
  * the appropriate implementation that implements the RedisConnectionInterface.
  */
 public class RedisConnectionFactory {
-    
-    private static final Logger logger = Logger.getLogger(RedisConnectionFactory.class.getName());
-    
+
     /**
      * Creates a Redis connection instance based on the configuration in the BrowseContext.
      * The factory analyzes the configuration to determine:
@@ -55,15 +52,12 @@ public class RedisConnectionFactory {
         try {
             switch (config.getClusteringPolicy()) {
                 case OSS_CLUSTERED:
-                    logger.info("Creating OSS clustered Redis connection");
                     return new ClusteredRedisConnection(config, factory);
                 case NON_CLUSTERED:
                 default:
                     if (config.isPoolEnabled()) {
-                        logger.info("Creating standalone pooled Redis connection");
                         return new StandalonePooledRedisConnection(config, factory);
                     }
-                    logger.info("Creating standalone Redis connection");
                     return new StandaloneRedisConnection(config, factory);
             }
         } catch (Exception e) {
