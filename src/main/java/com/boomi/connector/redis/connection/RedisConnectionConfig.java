@@ -26,6 +26,7 @@ public class RedisConnectionConfig {
 
     private final PropertyMap propertiesMap;
     private final String hosts;
+    private final String connectionId;
     private final boolean useSSL;
     private final boolean poolEnabled;
     private final int connectionTimeout;
@@ -52,7 +53,13 @@ public class RedisConnectionConfig {
         if (hosts == null || hosts.isEmpty()) {
             throw new IllegalArgumentException("Host is empty");
         }
-        
+
+        // The Boomi runtime injects the connection component's id under the "id" property key.
+        // It is part of the shared-client identity: two connection components with identical
+        // values are still two distinct components and must get two distinct pools.
+        String id = propertiesMap.getProperty("id");
+        this.connectionId = (id == null) ? "" : id;
+
         this.useSSL = propertiesMap.getBooleanProperty("useSSL", Boolean.FALSE);
         this.poolEnabled = propertiesMap.getBooleanProperty("poolEnabled", Boolean.FALSE);
         
@@ -172,6 +179,9 @@ public class RedisConnectionConfig {
 
     // Getters
     public String getHosts() { return hosts; }
+
+    /** The Boomi connection component id ("" when not supplied, e.g. in unit tests). */
+    public String getConnectionId() { return connectionId; }
     public boolean isSSLEnabled() { return useSSL; }
     public int getConnectionTimeout() { return connectionTimeout; }
     public int getSocketTimeout() { return socketTimeout; }

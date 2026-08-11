@@ -244,4 +244,23 @@ public class RedisConnectionConfigTest {
         String identity2 = new RedisConnectionConfig(ctx2).getAuthIdentity();
         assertNotEquals(identity1, identity2);
     }
+
+    @Test
+    public void connectionIdReadFromIdProperty() {
+        PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("authenticationType")).thenReturn("None");
+        when(props.getProperty("id")).thenReturn("abc-123-component");
+        BrowseContext ctx = mock(BrowseContext.class);
+        when(ctx.getConnectionProperties()).thenReturn(props);
+        assertEquals("abc-123-component", new RedisConnectionConfig(ctx).getConnectionId());
+    }
+
+    @Test
+    public void connectionIdDefaultsToEmptyWhenAbsent() {
+        // Mocked PropertyMaps (and possibly some runtime paths) have no "id" entry; the config
+        // must normalize to "" so RedisClientSettings equality never trips over null.
+        RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhost:6379"));
+        assertEquals("", config.getConnectionId());
+    }
 }
