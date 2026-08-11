@@ -2,6 +2,7 @@ package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
+import com.boomi.connector.redis.pool.RedisClientPoolManager;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.After;
 import org.junit.Before;
@@ -19,7 +20,7 @@ public class RedisConnectionFactoryTest {
 
     @Before
     public void setUp() {
-        StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
         ClusteredRedisConnection.closeAllSharedClusters();
         factory = mock(JedisClientFactory.class);
         when(factory.createClient(any(HostAndPort.class), any(JedisClientConfig.class)))
@@ -34,7 +35,7 @@ public class RedisConnectionFactoryTest {
 
     @After
     public void tearDown() {
-        StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
         ClusteredRedisConnection.closeAllSharedClusters();
     }
 

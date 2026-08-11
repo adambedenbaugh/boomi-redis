@@ -3,6 +3,7 @@ package com.boomi.connector.redis;
 import com.boomi.connector.api.OAuth2Context;
 import com.boomi.connector.api.OAuth2Token;
 import com.boomi.connector.api.OperationType;
+import com.boomi.connector.redis.pool.RedisClientPoolManager;
 import com.boomi.connector.redis.testutil.FakeJwt;
 import com.boomi.connector.testutil.SimpleBrowseContext;
 import org.junit.*;
@@ -45,12 +46,12 @@ public class RedisEntraPoolingIT {
 
     @Before
     public void resetSharedPoolsBefore() {
-        com.boomi.connector.redis.connection.StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
     }
 
     @After
     public void resetSharedPoolsAfter() {
-        com.boomi.connector.redis.connection.StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
     }
 
     private static void exec(String... cmd) throws Exception {

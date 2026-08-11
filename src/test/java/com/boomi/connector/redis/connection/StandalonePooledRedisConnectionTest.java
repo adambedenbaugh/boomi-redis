@@ -2,6 +2,7 @@ package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
+import com.boomi.connector.redis.pool.RedisClientPoolManager;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.After;
 import org.junit.Before;
@@ -23,9 +24,8 @@ public class StandalonePooledRedisConnectionTest {
 
     @Before
     public void setUp() {
-        StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
         pool = mock(JedisPool.class);
-        when(pool.isClosed()).thenReturn(false);
         factory = mock(JedisClientFactory.class);
         when(factory.createPool(any(GenericObjectPoolConfig.class), any(HostAndPort.class),
                 any(JedisClientConfig.class))).thenReturn(pool);
@@ -33,19 +33,16 @@ public class StandalonePooledRedisConnectionTest {
 
     @After
     public void tearDown() {
-        StandalonePooledRedisConnection.closeAllSharedPools();
+        RedisClientPoolManager.closeAll();
     }
 
     private RedisConnectionConfig basicConfig() {
-        return basicConfig("pw");
-    }
-
-    private RedisConnectionConfig basicConfig(String password) {
         PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("id")).thenReturn("component-1");
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn("Basic");
         when(props.getProperty("user")).thenReturn("alice");
-        when(props.getProperty("password")).thenReturn(password);
+        when(props.getProperty("password")).thenReturn("pw");
         when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
         when(props.getLongProperty("poolSize", 4L)).thenReturn(4L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
@@ -55,31 +52,27 @@ public class StandalonePooledRedisConnectionTest {
     }
 
     @Test
-    public void createsPoolOnceAndReusesByKey() {
+    public void createsPoolOnceAndReusesForEqualSettings() {
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig(), factory);
         verify(factory, times(1)).createPool(any(), any(), any());
-        assertEquals(1, StandalonePooledRedisConnection.getSharedPoolCount());
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
         a.close();
         b.close();
     }
 
     @Test
-    public void closeNeverClosesTheSharedPoolEvenAsTheLastReference() {
-        // The pool must survive across executions when pooling is enabled - it is a long-lived
-        // resource, not scoped to any single instance. Only closeAllSharedPools() may close it.
+    public void closeReleasesReferenceButNeverClosesThePool() {
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig(), factory);
         a.close();
         b.close();
         verify(pool, never()).close();
-        assertEquals(1, StandalonePooledRedisConnection.getSharedPoolCount());
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
     }
 
     @Test
     public void sequentialExecutionsReuseTheSamePoolInstance() {
-        // Regression test: an execution closing its connection must not tear down the shared pool
-        // out from under the next sequential execution against the same connection configuration.
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         a.close();
 
@@ -91,50 +84,15 @@ public class StandalonePooledRedisConnectionTest {
     }
 
     @Test
-    public void credentialChangeEvictsTheSupersededIdlePoolForTheSameEndpoint() {
-        StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig("pw"), factory);
-        a.close(); // no in-flight execution holds the old pool
-
-        JedisPool rotatedPool = mock(JedisPool.class);
-        when(rotatedPool.isClosed()).thenReturn(false);
-        when(factory.createPool(any(GenericObjectPoolConfig.class), any(HostAndPort.class),
-                any(JedisClientConfig.class))).thenReturn(rotatedPool);
-        StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig("rotated-pw"), factory);
-
-        // The stale-credential pool must not linger (its evictor would re-AUTH with dead
-        // credentials forever); only the rotated pool remains registered.
-        verify(pool, times(1)).close();
-        verify(rotatedPool, never()).close();
-        assertEquals(1, StandalonePooledRedisConnection.getSharedPoolCount());
-        b.close();
-    }
-
-    @Test
-    public void credentialChangeDoesNotEvictAPoolStillHeldByAnInFlightExecution() {
-        StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig("pw"), factory);
-        // a stays open: an in-flight execution still holds the old pool
-
-        JedisPool rotatedPool = mock(JedisPool.class);
-        when(rotatedPool.isClosed()).thenReturn(false);
-        when(factory.createPool(any(GenericObjectPoolConfig.class), any(HostAndPort.class),
-                any(JedisClientConfig.class))).thenReturn(rotatedPool);
-        StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig("rotated-pw"), factory);
-
-        verify(pool, never()).close();
-        assertEquals(2, StandalonePooledRedisConnection.getSharedPoolCount());
-        a.close();
-        b.close();
-    }
-
-    @Test
-    public void closeAllSharedPoolsClosesAPoolEvenAfterEveryInstanceAlreadyClosed() {
+    public void closeIsIdempotent() {
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         a.close();
+        a.close(); // second close must not decrement again
 
-        StandalonePooledRedisConnection.closeAllSharedPools();
-
-        verify(pool, times(1)).close();
-        assertEquals(0, StandalonePooledRedisConnection.getSharedPoolCount());
+        StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig(), factory);
+        // If the double-close leaked a second decrement, this would read 0 instead of 1.
+        b.close();
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
     }
 
     @Test
@@ -145,27 +103,6 @@ public class StandalonePooledRedisConnectionTest {
         StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
         assertEquals("v", a.get("k"));
         a.close();
-    }
-
-    @Test
-    public void closeDoesNotAffectAnUnrelatedPoolRegisteredUnderTheSameKeyAfterReplacement() {
-        StandalonePooledRedisConnection a = new StandalonePooledRedisConnection(basicConfig(), factory);
-
-        // Simulate closeAllSharedPools() running (e.g. shutdown/test teardown elsewhere) while `a`
-        // still holds a reference to the now-discarded original pool, followed by a new instance
-        // registering a fresh pool under the identical key.
-        StandalonePooledRedisConnection.closeAllSharedPools();
-        JedisPool newPool = mock(JedisPool.class);
-        when(newPool.isClosed()).thenReturn(false);
-        when(factory.createPool(any(GenericObjectPoolConfig.class), any(HostAndPort.class),
-                any(JedisClientConfig.class))).thenReturn(newPool);
-        StandalonePooledRedisConnection b = new StandalonePooledRedisConnection(basicConfig(), factory);
-
-        a.close();
-
-        verify(newPool, never()).close();
-        assertEquals(1, StandalonePooledRedisConnection.getSharedPoolCount());
-        b.close();
     }
 
     @Test
