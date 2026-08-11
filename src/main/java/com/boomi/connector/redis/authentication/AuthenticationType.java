@@ -23,21 +23,22 @@ public enum AuthenticationType {
     /**
      * Creates an AuthenticationType from a configuration string value
      * @param value the configuration string value
-     * @return the corresponding AuthenticationType, or NONE if not found
+     * @return the corresponding AuthenticationType; NONE when null/blank
+     * @throws IllegalArgumentException on an unrecognized non-blank value
      */
     public static AuthenticationType fromValue(String value) {
         if (value == null || value.trim().isEmpty()) {
             return NONE;
         }
-        
+
         for (AuthenticationType type : values()) {
             if (type.value.equalsIgnoreCase(value.trim())) {
                 return type;
             }
         }
-        
-        // Default to NONE if unknown value
-        return NONE;
+
+        throw new IllegalArgumentException("Unknown Authentication Type: '" + value
+                + "'. Expected one of None, Basic, MicrosoftEntraClientSecretCredential.");
     }
     
     /**

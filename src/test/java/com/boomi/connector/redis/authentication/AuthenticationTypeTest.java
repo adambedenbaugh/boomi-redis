@@ -22,10 +22,16 @@ public class AuthenticationTypeTest {
     }
 
     @Test
-    public void testFromValueDefaultsToNoneForUnknownInput() {
-        assertEquals(NONE, fromValue("bogus"));
-        assertEquals(NONE, fromValue("OAuth"));
-        assertEquals(NONE, fromValue("token"));
+    public void testFromValueThrowsDescriptiveOnUnknownInput() {
+        for (String bogus : new String[] {"bogus", "OAuth", "token"}) {
+            try {
+                fromValue(bogus);
+                fail("expected IllegalArgumentException for '" + bogus + "'");
+            } catch (IllegalArgumentException e) {
+                assertTrue(e.getMessage().contains(bogus));
+                assertTrue(e.getMessage().contains("Basic"));
+            }
+        }
     }
 
     @Test
