@@ -12,6 +12,8 @@ import redis.clients.jedis.RedisCredentialsProvider;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -20,15 +22,34 @@ import java.util.logging.Logger;
  * For Entra, delegates token acquisition (and expiry-aware refresh) to Boomi's OAuth2Context on
  * every call, so pooled connections always authenticate with a current token. Token fetches are
  * serialized (single-flight) so a burst of new connections cannot stampede the token endpoint.
+ *
+ * <p><b>Entra token fetches always flow through the newest execution's OAuth2Context.</b> A
+ * shared pooled client ({@code JedisPool}/{@code JedisCluster}) outlives the execution that built
+ * it, but the provider baked into that client captured the <i>building</i> execution's
+ * OAuth2Context - and a completed execution's context stops yielding fresh tokens, which surfaces
+ * on a real Atom as {@code WRONGPASS invalid username-password pair} once the original token
+ * expires (observed 2026-08-11: second pooled execution failed after the ~1h token lifetime while
+ * unpooled executions kept working). Every execution constructs a provider even when it reuses a
+ * shared client, so the constructor registers that execution's live context in
+ * {@link #CURRENT_CONTEXTS} keyed by the credential identity, and {@link #entraCredentials()}
+ * reads the newest one at fetch time.
  */
 public class BoomiRedisCredentialsProvider implements RedisCredentialsProvider {
 
     private static final Logger logger = Logger.getLogger(BoomiRedisCredentialsProvider.class.getName());
 
+    /**
+     * Newest OAuth2Context seen per credential identity (clientId + clientSecret + accessTokenUrl).
+     * Bounded by the number of distinct OAuth credential configurations ever seen in the JVM.
+     * Never logged - the key contains the client secret.
+     */
+    private static final ConcurrentMap<String, OAuth2Context> CURRENT_CONTEXTS = new ConcurrentHashMap<>();
+
     private final AuthenticationType authType;
     private final String basicUser;
     private final String basicPassword;
     private final OAuth2Context oauth2Context;
+    private final String contextKey;
     private final Object refreshLock = new Object();
 
     public BoomiRedisCredentialsProvider(AuthenticationType authType, String basicUser,
@@ -45,6 +66,28 @@ public class BoomiRedisCredentialsProvider implements RedisCredentialsProvider {
         this.basicUser = basicUser;
         this.basicPassword = basicPassword;
         this.oauth2Context = oauth2Context;
+        if (authType == AuthenticationType.MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL) {
+            this.contextKey = contextKey(oauth2Context);
+            // This constructor runs once per execution (even when the execution reuses a shared
+            // pooled client), so the registered context is always the live execution's.
+            CURRENT_CONTEXTS.put(contextKey, oauth2Context);
+        } else {
+            this.contextKey = null;
+        }
+    }
+
+    private static String contextKey(OAuth2Context ctx) {
+        return nullSafe(ctx.getClientId()) + '\n' + nullSafe(ctx.getClientSecret())
+                + '\n' + nullSafe(ctx.getAccessTokenUrl());
+    }
+
+    private static String nullSafe(String value) {
+        return value == null ? "" : value;
+    }
+
+    /** Test-only: resets the per-credential context registry (static state isolation). */
+    static void clearCurrentContexts() {
+        CURRENT_CONTEXTS.clear();
     }
 
     @Override
@@ -67,9 +110,12 @@ public class BoomiRedisCredentialsProvider implements RedisCredentialsProvider {
 
     private RedisCredentials entraCredentials() {
         synchronized (refreshLock) {
+            // Always fetch through the newest execution's context for this credential (see class
+            // javadoc); fall back to the constructor's context only if the registry was cleared.
+            OAuth2Context current = CURRENT_CONTEXTS.getOrDefault(contextKey, oauth2Context);
             OAuth2Token token;
             try {
-                token = oauth2Context.getOAuth2Token(false);
+                token = current.getOAuth2Token(false);
             } catch (IOException e) {
                 logger.log(Level.WARNING, "Failed to obtain Microsoft Entra token from Boomi OAuth2 "
                         + "credential component", e);

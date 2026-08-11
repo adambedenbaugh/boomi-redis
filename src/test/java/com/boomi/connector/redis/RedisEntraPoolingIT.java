@@ -128,6 +128,42 @@ public class RedisEntraPoolingIT {
     }
 
     @Test
+    public void staleCreatingExecutionContextIsNotUsedOnceANewerExecutionRegisters() throws Exception {
+        // Models the production WRONGPASS (2026-08-11): execution 1 builds the shared pool, so its
+        // provider - holding execution 1's OAuth2Context - is baked into the pooled client config.
+        // Once execution 1 completes, its context goes stale and eventually yields a token Redis
+        // rejects (here simulated by re-stubbing it with a token for an unauthorized user).
+        // Execution 2 reuses the shared pool with a fresh context for the SAME credential; after a
+        // connection kill forces re-authentication, the pool must authenticate via execution 2's
+        // live context - never the stale creating-execution context.
+        OAuth2Context staleCtx = entraContextReturning(FakeJwt.token(OID));
+        RedisConnection first = pooledEntraConnection(staleCtx);
+        try {
+            first.set("stale-test-key", "v1", -1L);
+        } finally {
+            first.close();
+        }
+
+        // Execution 1 is over: its context now yields a token whose oid has no ACL user, so any
+        // AUTH through it fails - exactly like an expired real-world token.
+        OAuth2Token dead = mock(OAuth2Token.class);
+        when(dead.getAccessToken()).thenReturn(FakeJwt.token("00000000-dead-0000-0000-000000000000"));
+        when(staleCtx.getOAuth2Token(false)).thenReturn(dead);
+
+        OAuth2Context liveCtx = entraContextReturning(FakeJwt.token(OID));
+        RedisConnection second = pooledEntraConnection(liveCtx);
+        try {
+            // Kill every pooled connection so the next borrow must build + re-authenticate.
+            exec("redis-cli", "-a", ADMIN_PASS, "CLIENT", "KILL", "TYPE", "normal");
+
+            assertEquals("v1", second.get("stale-test-key"));
+            verify(liveCtx, atLeastOnce()).getOAuth2Token(false);
+        } finally {
+            second.close();
+        }
+    }
+
+    @Test
     public void missingOidClaimFailsWithDescriptiveError() throws Exception {
         OAuth2Context ctx = mock(OAuth2Context.class);
         when(ctx.getClientId()).thenReturn("test-client");
