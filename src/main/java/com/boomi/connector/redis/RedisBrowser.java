@@ -42,7 +42,8 @@ public class RedisBrowser extends BaseBrowser {
 				return types.withTypes(objectType);
 				
 			default:
-				throw new UnsupportedOperationException();
+				throw new UnsupportedOperationException("Unsupported operation type: "
+						+ this.getContext().getOperationType() + ". Expected GET, UPSERT, or DELETE.");
 		}
 	}
 
