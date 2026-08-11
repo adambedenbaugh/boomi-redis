@@ -28,7 +28,7 @@ public class RedisUpsertOperation extends BaseUpdateOperation {
 	protected void executeUpdate(UpdateRequest request, OperationResponse response) {
 		logger = response.getLogger();
 		
-		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix");
+		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
 		// set_ttl is overrideable="true", so its effective value can be supplied per-document as a
 		// Dynamic Operation Property. Overridable String/Integer/Boolean properties must be read from
 		// ObjectData.getDynamicOperationProperties() (per the SDK contract), not getOperationProperties().
@@ -36,22 +36,34 @@ public class RedisUpsertOperation extends BaseUpdateOperation {
 		long staticTtl = getContext().getOperationProperties().getLongProperty("set_ttl", -1L);
 
 		RedisConnection redisConnection = new RedisConnection(getContext());
-		redisConnection.init();
 
-		for (ObjectData input : request) {
-			try {
-				long ttl = resolveTtl(input, staticTtl);
-				String inputStr = RedisUtils.inputStreamToString(input.getData());
-				JsonObject jsonObject = RedisUtils.parseJson(inputStr);
-				String objectId = RedisUtils.getJsonStringValue(jsonObject, "key");
-				String value = RedisUtils.getJsonStringValue(jsonObject, "value");
+		try {
+			redisConnection.init();
 
-				upsert(redisConnection, keyPrefix, objectId, value, ttl);
-				response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
-			} catch (Exception e) {
-				logger.log(Level.SEVERE, "Details of Exception:", e);
-				ResponseUtil.addExceptionFailure(response, input, e);
+			for (ObjectData input : request) {
+				try {
+					long ttl = resolveTtl(input, staticTtl);
+					String inputStr = RedisUtils.inputStreamToString(input.getData());
+					JsonObject jsonObject = RedisUtils.parseJson(inputStr);
+					String objectId = RedisUtils.getJsonStringValue(jsonObject, "key");
+					String value = RedisUtils.getJsonStringValue(jsonObject, "value");
+
+					if (objectId == null || objectId.isEmpty()) {
+						throw new ConnectorException("The document is missing a non-empty \"key\" field.");
+					}
+					if (value == null) {
+						throw new ConnectorException("The document is missing a \"value\" field.");
+					}
+
+					upsert(redisConnection, keyPrefix, objectId, value, ttl);
+					response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
+				} catch (Exception e) {
+					logger.log(Level.SEVERE, "Details of Exception:", e);
+					ResponseUtil.addExceptionFailure(response, input, e);
+				}
 			}
+		} finally {
+			redisConnection.close();
 		}
 	}
 
@@ -76,7 +88,7 @@ public class RedisUpsertOperation extends BaseUpdateOperation {
 
 	public void upsert(RedisConnection redisConnection, String keyPrefix, String key, String value, Long ttl) {
 		String combinedKey = keyPrefix  + key;
-		logger.fine("Upserting key: " + combinedKey + " with value: " + value + " and TTL: " + ttl);
+		logger.fine("Upserting key: " + combinedKey + " with TTL: " + ttl);
 		redisConnection.set(combinedKey, value, ttl);
 	}
 }

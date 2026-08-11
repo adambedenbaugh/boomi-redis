@@ -24,20 +24,15 @@ public class RedisGetOperation extends BaseGetOperation {
 	private static final String SUCCESS_STATUS_CODE = "200";
 	private static final String SUCCESS_MESSAGE = "OK";
 
-	private String keyPrefix;
-	private boolean removeKeyPrefixFromResponse;
-	private boolean throwException;
-	private Logger logger;
-	
 	private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-	
+
 	// JSON serialization for the response
 	private static class KeyValuePair {
 		@SuppressWarnings("unused")
 		private final String key;
 		@SuppressWarnings("unused")
 		private final String value;
-		
+
 		public KeyValuePair(String key, String value) {
 			this.key = key;
 			this.value = value;
@@ -50,38 +45,42 @@ public class RedisGetOperation extends BaseGetOperation {
 
 	@Override
 	protected void executeGet(GetRequest request, OperationResponse response) {
-		this.logger = response.getLogger();
+		Logger logger = response.getLogger();
 
-		this.keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
-		this.removeKeyPrefixFromResponse = getContext().getOperationProperties().getBooleanProperty("remove_key_prefix_from_response", true);
-		this.throwException = getContext().getOperationProperties().getBooleanProperty("throw_exception");
+		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
+		boolean removeKeyPrefixFromResponse = getContext().getOperationProperties()
+				.getBooleanProperty("remove_key_prefix_from_response", true);
+		boolean throwException = getContext().getOperationProperties()
+				.getBooleanProperty("throw_exception", false);
 
-		// RedisOperationConfig config = new RedisOperationConfig(getContext(), logger);
 		ObjectIdData input = request.getObjectId();
+		RedisConnection redisConnection = new RedisConnection(getContext());
 
 		try {
+			redisConnection.init();
 			String objectId = input.getObjectId();
 
-			RedisConnection redisConnection = new RedisConnection(getContext());
-			redisConnection.init();
-
 			if (!WILDCARD_OBJECT_ID.equals(objectId)) {
-				handleSingleGet(objectId, redisConnection, response, input);
+				handleSingleGet(objectId, redisConnection, response, input, logger,
+						keyPrefix, removeKeyPrefixFromResponse, throwException);
 			} else {
-				handleGetAll(redisConnection, response, input);
+				handleGetAll(redisConnection, response, input, logger,
+						keyPrefix, removeKeyPrefixFromResponse, throwException);
 			}
 
 		} catch (Exception e) {
 			ResponseUtil.addExceptionFailure(response, input, e);
+		} finally {
+			redisConnection.close();
 		}
 	}
 
-	private void handleSingleGet(String objectId,
-	                           RedisConnection connection, OperationResponse response, 
-	                           ObjectIdData input) {
+	private void handleSingleGet(String objectId, RedisConnection connection, OperationResponse response,
+	                           ObjectIdData input, Logger logger, String keyPrefix,
+	                           boolean removeKeyPrefixFromResponse, boolean throwException) {
 		String combinedKey = keyPrefix + objectId;
 		logger.fine("Key: " + combinedKey);
-		String cachedValue = connection.get(combinedKey);			
+		String cachedValue = connection.get(combinedKey);
 
 		if (throwException && cachedValue == null) {
 			ResponseUtil.addExceptionFailure(response, input, new Exception("Key not found."));
@@ -105,29 +104,30 @@ public class RedisGetOperation extends BaseGetOperation {
 		}
 	}
 
-	private void handleGetAll(RedisConnection connection, 
-	                        OperationResponse response, ObjectIdData input) {
+	private void handleGetAll(RedisConnection connection, OperationResponse response, ObjectIdData input,
+	                        Logger logger, String keyPrefix, boolean removeKeyPrefixFromResponse,
+	                        boolean throwException) {
 		logger.fine("Get all keys with prefix: " + keyPrefix);
 		Map<String, String> cachedValue = connection.getAll(keyPrefix);
-		
-		if (throwException && cachedValue == null) {
-			ResponseUtil.addExceptionFailure(response, input, new Exception("Value not found in the Cache"));
+
+		if (throwException && cachedValue.isEmpty()) {
+			ResponseUtil.addExceptionFailure(response, input, new Exception("No keys found matching the configured prefix."));
 			return;
 		}
 
-		if (cachedValue != null) {
+		if (!cachedValue.isEmpty()) {
 			List<KeyValuePair> keyValueList = new ArrayList<>();
 			for (Map.Entry<String, String> entry : cachedValue.entrySet()) {
-				if(removeKeyPrefixFromResponse){
+				if (removeKeyPrefixFromResponse) {
 					String fullKey = entry.getKey();
 					String keyWithoutPrefix = RedisUtils.removePrefix(fullKey, keyPrefix);
-				    keyValueList.add(new KeyValuePair(keyWithoutPrefix, entry.getValue()));
+					keyValueList.add(new KeyValuePair(keyWithoutPrefix, entry.getValue()));
 				} else {
-				    keyValueList.add(new KeyValuePair(entry.getKey(), entry.getValue()));
+					keyValueList.add(new KeyValuePair(entry.getKey(), entry.getValue()));
 				}
 			}
 			String jsonResponse = gson.toJson(keyValueList);
-			response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE, 
+			response.addResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE,
 				ResponseUtil.toPayload(jsonResponse));
 		} else {
 			response.addEmptyResult(input, OperationStatus.SUCCESS, SUCCESS_STATUS_CODE, SUCCESS_MESSAGE);

@@ -113,7 +113,7 @@ public class RedisUpsertOperationTest {
     }
 
     @Test
-    public void testUpsertWithNullValuePassesNullToSet() throws Exception {
+    public void testUpsertWithNullValueAddsFailureAndNeverCallsSet() throws Exception {
         String payload = "{\"key\": \"mykey\", \"value\": null}";
 
         try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
@@ -122,8 +122,51 @@ public class RedisUpsertOperationTest {
                     Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
 
             assertFalse(results.isEmpty());
-            assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
-            verify(mocked.constructed().get(0)).set("prefix:mykey", null, -1L);
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            verify(mocked.constructed().get(0), never()).set(anyString(), any(), any());
+        }
+    }
+
+    @Test
+    public void testUpsertWithMissingKeyAddsFailureAndNeverCallsSet() throws Exception {
+        String payload = "{\"value\": \"myvalue\"}";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            List<SimpleOperationResult> results = tester.executeUpsertOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            verify(mocked.constructed().get(0), never()).set(anyString(), any(), any());
+        }
+    }
+
+    @Test
+    public void testUpsertWithEmptyKeyAddsFailureAndNeverCallsSet() throws Exception {
+        String payload = "{\"key\": \"\", \"value\": \"myvalue\"}";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            List<SimpleOperationResult> results = tester.executeUpsertOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            verify(mocked.constructed().get(0), never()).set(anyString(), any(), any());
+        }
+    }
+
+    @Test
+    public void testConnectionIsClosedAfterExecute() throws Exception {
+        String payload = "{\"key\": \"mykey\", \"value\": \"myvalue\"}";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+
+            tester.executeUpsertOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            verify(mocked.constructed().get(0)).close();
         }
     }
 }

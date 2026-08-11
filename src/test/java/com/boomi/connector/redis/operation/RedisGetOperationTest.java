@@ -132,4 +132,42 @@ public class RedisGetOperationTest {
             verify(mocked.constructed().get(0)).getAll("prefix:");
         }
     }
+
+    @Test
+    public void testWildcardWithNoMatchesReturnsEmptySuccess() throws Exception {
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, ctx) -> when(mock.getAll("prefix:")).thenReturn(new HashMap<>()))) {
+
+            List<SimpleOperationResult> results = tester.executeGetOperation("*");
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
+        }
+    }
+
+    @Test
+    public void testThrowExceptionWhenWildcardHasNoMatches() throws Exception {
+        opProps.put("throw_exception", true);
+        tester.setOperationContext(OperationType.GET, connProps, opProps, "Get", null);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, ctx) -> when(mock.getAll("prefix:")).thenReturn(new HashMap<>()))) {
+
+            List<SimpleOperationResult> results = tester.executeGetOperation("*");
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+        }
+    }
+
+    @Test
+    public void testConnectionIsClosedAfterExecute() throws Exception {
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, ctx) -> when(mock.get("prefix:mykey")).thenReturn("my-value"))) {
+
+            tester.executeGetOperation("mykey");
+
+            verify(mocked.constructed().get(0)).close();
+        }
+    }
 }

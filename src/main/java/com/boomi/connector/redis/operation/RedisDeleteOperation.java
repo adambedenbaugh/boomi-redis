@@ -1,5 +1,6 @@
 package com.boomi.connector.redis.operation;
 
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.boomi.connector.api.DeleteRequest;
@@ -24,32 +25,39 @@ public class RedisDeleteOperation extends BaseDeleteOperation {
 	protected void executeDelete(DeleteRequest request, OperationResponse response) {
 		logger = response.getLogger();
 		
-		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix");
+		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
 		// boolean autoKey = getContext().getOperationProperties().getBooleanProperty("auto_key");
 
 		RedisConnection redisConnection = new RedisConnection(getContext());
-		redisConnection.init();
-		
-		for (ObjectIdData input : request) {
-            try {
-            	String objectId = input.getObjectId();
-            	if("*".equals(objectId)) {
-            		logger.fine("Found wildcard objectId - executing batch delete");
-            		delete(redisConnection, keyPrefix);
-            	} else {
-            		delete(redisConnection, keyPrefix, objectId);
-            	}
-                response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
-            }
-            catch (Exception e) {
-            	logger.severe("Details of Exception: " + e.getMessage());
-                ResponseUtil.addExceptionFailure(response, input, e);
-            }
-        }
+
+		try {
+			redisConnection.init();
+
+			for (ObjectIdData input : request) {
+				try {
+					String objectId = input.getObjectId();
+					if ("*".equals(objectId)) {
+						logger.fine("Found wildcard objectId - executing batch delete");
+						delete(redisConnection, keyPrefix);
+					} else {
+						delete(redisConnection, keyPrefix, objectId);
+					}
+					response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
+				} catch (Exception e) {
+					logger.log(Level.SEVERE, "Details of Exception:", e);
+					ResponseUtil.addExceptionFailure(response, input, e);
+				}
+			}
+		} finally {
+			redisConnection.close();
+		}
 	}
 
 	public void delete(RedisConnection redisConnection, String keyPrefix) {
-		redisConnection.delAll(keyPrefix + "*");
+		// Pass the raw prefix: the connection layer's prepareScanPattern is the single point that
+		// escapes glob metacharacters and appends the trailing wildcard, so wildcard DELETE and
+		// wildcard GET share identical matching semantics.
+		redisConnection.delAll(keyPrefix);
 	}
 
 	public void delete(RedisConnection redisConnection, String keyPrefix, String key) {
