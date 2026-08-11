@@ -19,6 +19,8 @@ example, `localhost:6379`). For **Single Endpoint**, provide the single endpoint
 For **OSS Cluster**, you may provide one or more comma-separated seed nodes
 (`host1:port1,host2:port2,...`) — any reachable seed is enough, as the client
 discovers the rest of the topology. Default is `localhost:6379`.
+IPv6 literal addresses (e.g. `::1`) are not supported — use a hostname or an
+IPv4 address.
 
 **Clustering Policy** — Tells the connector how the target Redis presents its
 topology, which determines the Redis client it uses. One of `Single Endpoint` or
@@ -71,12 +73,17 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 from the pool before failing. Applies only when pooling is enabled. Default is
 `5`.
 
-> **Note:** The pooling fields above govern the **standalone** connection path
-> (**Single Endpoint**). An **OSS Cluster** connection always maintains its own
-> internal per-node connection pool regardless of **Enable Connection Pooling** —
-> when pooling is enabled it uses **Maximum Connections** as the per-node limit,
-> otherwise a built-in default. Leaving **Enable Connection Pooling** off does not
-> disable cluster pooling.
+> **Note:** The pooling fields above also apply to **OSS Cluster** connections, not
+> just **Single Endpoint**. `JedisCluster` always maintains its own internal
+> per-node connection pool regardless of **Enable Connection Pooling** — that
+> field can't disable cluster-internal pooling, only change what it means:
+>
+> - **Enabled** — the cluster client (topology discovery plus its per-node pools)
+>   is shared and reused across operation executions, using **Maximum
+>   Connections** as the per-node limit, exactly like the standalone pooled path.
+> - **Disabled** — a private, single-use cluster client is built fresh for each
+>   execution and torn down immediately after, so its per-node pool only ever
+>   needs one connection.
 
 ## Clustering policy
 
