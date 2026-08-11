@@ -149,34 +149,6 @@ public class RedisConnectionConfig {
         }
     }
     
-    /**
-     * Stable identity for pool keying. Includes the stable credential material so that changing
-     * credentials produces a different key — a new pool bound to the new credentials — while the
-     * rotating Entra access token is deliberately excluded so token refresh never churns the key.
-     *
-     * <p>For Entra this keys on client id + a hash of the (stable) client secret + the access-token
-     * URL. Consequently, editing the OAuth 2.0 component's client secret or token URL (e.g. fixing a
-     * bad secret, or switching Azure Commercial -> Government) causes every new connection/execution
-     * to build and use a pool for the new credentials instead of reusing a stale one. The client
-     * secret is hashed so the key never contains secret material verbatim; Basic auth keys on
-     * username + password hash for the same reason.
-     */
-    public String getAuthIdentity() {
-        switch (authenticationType) {
-            case BASIC:
-                return "basic:" + username + ":" + java.util.Objects.hashCode(password);
-            case MICROSOFT_ENTRA_CLIENT_SECRET_CREDENTIAL:
-                if (entraOAuth2Context == null) {
-                    return "entra:";
-                }
-                return "entra:" + entraOAuth2Context.getClientId()
-                        + ":" + java.util.Objects.hashCode(entraOAuth2Context.getClientSecret())
-                        + ":" + entraOAuth2Context.getAccessTokenUrl();
-            default:
-                return "none";
-        }
-    }
-
     // Getters
     public String getHosts() { return hosts; }
 
