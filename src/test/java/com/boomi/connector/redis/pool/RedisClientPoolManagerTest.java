@@ -283,4 +283,78 @@ public class RedisClientPoolManagerTest {
         assertSame(client2, acquired);
         assertEquals(1, RedisClientPoolManager.getActiveReferences(settings("comp-1")));
     }
+
+    @Test
+    public void evictorStartsOnFirstAcquire() {
+        assertFalse("closeAll() in @Before must leave the evictor stopped",
+                RedisClientPoolManager.isEvictorRunning());
+
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+
+        assertTrue("first acquire must start the evictor",
+                RedisClientPoolManager.isEvictorRunning());
+    }
+
+    @Test
+    public void evictorKeepsRunningWhileClientsRegistered() {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+
+        // A sweep that evicts nothing, followed by the self-stop check the scheduled task runs.
+        RedisClientPoolManager.runEviction(System.currentTimeMillis());
+        RedisClientPoolManager.stopEvictorIfIdle();
+
+        assertTrue("a registered client must keep the evictor alive",
+                RedisClientPoolManager.isEvictorRunning());
+    }
+
+    @Test
+    public void evictorStopsWhenLastClientEvicted() {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+        RedisClientPoolManager.release(settings("comp-1"), client);
+
+        RedisClientPoolManager.runEviction(System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000);
+        RedisClientPoolManager.stopEvictorIfIdle();
+
+        assertFalse("with no clients left to watch, the evictor must stop itself",
+                RedisClientPoolManager.isEvictorRunning());
+    }
+
+    @Test
+    public void closeAllStopsTheEvictor() {
+        Closeable client = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client);
+        assertTrue(RedisClientPoolManager.isEvictorRunning());
+
+        RedisClientPoolManager.closeAll();
+
+        assertFalse("closeAll() must not leak the scheduler thread",
+                RedisClientPoolManager.isEvictorRunning());
+    }
+
+    @Test
+    public void acquireAfterSelfStopRestartsTheEvictor() throws Exception {
+        Closeable client1 = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client1);
+        RedisClientPoolManager.release(settings("comp-1"), client1);
+        RedisClientPoolManager.runEviction(System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000);
+        RedisClientPoolManager.stopEvictorIfIdle();
+        assertFalse(RedisClientPoolManager.isEvictorRunning());
+
+        Closeable client2 = mock(Closeable.class);
+        RedisClientPoolManager.acquire(settings("comp-1"), () -> client2);
+        assertTrue("acquire after self-stop must lazily restart the evictor",
+                RedisClientPoolManager.isEvictorRunning());
+
+        // The restarted evictor still evicts: idle-expire the new client and sweep it away.
+        RedisClientPoolManager.release(settings("comp-1"), client2);
+        RedisClientPoolManager.runEviction(System.currentTimeMillis()
+                + RedisClientPoolManager.CLIENT_EXPIRATION_INTERVAL_MILLIS + 1_000);
+        verify(client2).close();
+        assertEquals(0, RedisClientPoolManager.getActiveClientCount());
+    }
 }

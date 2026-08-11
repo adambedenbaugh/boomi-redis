@@ -46,6 +46,20 @@ import java.util.logging.Logger;
  * distinct {@link RedisClientSettings} ever seen in the JVM's lifetime (i.e. distinct Boomi
  * connection components times their distinct configuration states over time) - not unbounded in
  * practice.
+ *
+ * <p>A second deliberate deviation: the JMS reference starts its evictor in a static initializer
+ * and never stops it. {@code ExecutorUtil.newScheduler} threads are non-daemon, and the Connector
+ * SDK has no unload/destroy callback, so a never-stopped evictor pins the deployment's
+ * classloader until Atom restart - observed on a real Atom (2026-08-11) as a previous
+ * deployment's evictor still logging evictions after redeploy. This manager therefore starts the
+ * evictor lazily on {@link #acquire} and stops it when a sweep finds no registered clients
+ * ({@link #stopEvictorIfIdle()}): after a redeploy the old deployment gets no new acquires, its
+ * clients idle out within one expiry-plus-sweep window, the next sweep stops the thread, and the
+ * classloader becomes collectible. The acquire-vs-self-stop race resolves because acquire
+ * registers the client in {@code ACTIVE_CLIENTS} <b>before</b> its start-check: either the
+ * stopping sweep's {@code isEmpty()} (under the same {@code SCHEDULER_LOCK}) sees the new entry
+ * and stays alive, or it stopped first and the acquire's start-check restarts a fresh scheduler.
+ * No interleaving leaves a registered client unwatched.
  */
 public final class RedisClientPoolManager {
 
@@ -60,17 +74,14 @@ public final class RedisClientPoolManager {
             new ConcurrentHashMap<>();
     private static final ConcurrentMap<RedisClientSettings, Object> KEY_LOCKS = new ConcurrentHashMap<>();
 
-    private static final ScheduledExecutorService EVICTION_SERVICE =
-            ExecutorUtil.newScheduler("Redis Client Pool Eviction Service");
+    /**
+     * Guards the evictor's lifecycle ({@link #evictionService} start/stop). Never held while a
+     * per-settings lock is taken or a client is closed, so it cannot participate in a lock cycle.
+     */
+    private static final Object SCHEDULER_LOCK = new Object();
 
-    static {
-        EVICTION_SERVICE.scheduleAtFixedRate(new Runnable() {
-            @Override
-            public void run() {
-                runEviction(System.currentTimeMillis());
-            }
-        }, EVICTION_INTERVAL_MINUTES, EVICTION_INTERVAL_MINUTES, TimeUnit.MINUTES);
-    }
+    /** Live eviction scheduler, or {@code null} while stopped. Guarded by {@link #SCHEDULER_LOCK}. */
+    private static ScheduledExecutorService evictionService;
 
     private RedisClientPoolManager() {
     }
@@ -83,19 +94,23 @@ public final class RedisClientPoolManager {
     @SuppressWarnings("unchecked")
     public static <T extends AutoCloseable> T acquire(RedisClientSettings settings, Supplier<T> clientBuilder) {
         Object lock = KEY_LOCKS.computeIfAbsent(settings, k -> new Object());
+        T result;
         synchronized (lock) {
             long now = System.currentTimeMillis();
             ManagedClient existing = ACTIVE_CLIENTS.get(settings);
             if (existing != null && !existing.closed) {
                 existing.activeReferences.incrementAndGet();
                 existing.touch(now);
-                return (T) existing.client;
+                result = (T) existing.client;
+            } else {
+                T client = clientBuilder.get();
+                ACTIVE_CLIENTS.put(settings, new ManagedClient(client, now));
+                LOG.info("Registered new shared Redis client for " + settings);
+                result = client;
             }
-            T client = clientBuilder.get();
-            ACTIVE_CLIENTS.put(settings, new ManagedClient(client, now));
-            LOG.info("Registered new shared Redis client for " + settings);
-            return client;
         }
+        ensureEvictorRunning();
+        return result;
     }
 
     /**
@@ -110,6 +125,51 @@ public final class RedisClientPoolManager {
         if (managed != null && managed.client == client) {
             managed.activeReferences.decrementAndGet();
             managed.touch(System.currentTimeMillis());
+        }
+    }
+
+    /**
+     * Starts the eviction scheduler if it is not running. Called on every {@link #acquire} -
+     * idempotent and cheap (a null check under {@link #SCHEDULER_LOCK}). Lazy start plus
+     * {@link #stopEvictorIfIdle()} is what lets a superseded deployment's classloader unload: the
+     * SDK has no connector-unload callback, so the thread must stop itself when there is nothing
+     * left to watch, and restart when work reappears.
+     */
+    private static void ensureEvictorRunning() {
+        synchronized (SCHEDULER_LOCK) {
+            if (evictionService == null) {
+                evictionService = ExecutorUtil.newScheduler("Redis Client Pool Eviction Service");
+                evictionService.scheduleAtFixedRate(new Runnable() {
+                    @Override
+                    public void run() {
+                        runEviction(System.currentTimeMillis());
+                        stopEvictorIfIdle();
+                    }
+                }, EVICTION_INTERVAL_MINUTES, EVICTION_INTERVAL_MINUTES, TimeUnit.MINUTES);
+            }
+        }
+    }
+
+    /**
+     * Shuts the evictor down when no clients remain registered; the next {@link #acquire}
+     * restarts it. Package-visible so tests can drive the scheduled task's exact sequence
+     * (sweep, then self-stop check) deterministically. Calling {@code shutdown()} from within
+     * the scheduler's own task is legal - the in-flight run completes and no further runs fire.
+     */
+    static void stopEvictorIfIdle() {
+        synchronized (SCHEDULER_LOCK) {
+            if (evictionService != null && ACTIVE_CLIENTS.isEmpty()) {
+                evictionService.shutdown();
+                evictionService = null;
+                LOG.info("Redis client pool evictor stopped (no registered clients)");
+            }
+        }
+    }
+
+    /** Test-only introspection: whether the eviction scheduler is currently running. */
+    static boolean isEvictorRunning() {
+        synchronized (SCHEDULER_LOCK) {
+            return evictionService != null;
         }
     }
 
@@ -154,6 +214,7 @@ public final class RedisClientPoolManager {
             managed.closeQuietly();
         }
         ACTIVE_CLIENTS.clear();
+        stopEvictorIfIdle();
     }
 
     /** Number of registered shared clients. Diagnostics/monitoring. */
