@@ -15,8 +15,14 @@ import java.util.Set;
  */
 public class RedisConnectionConfig {
 
-    /** Default cluster internal-pool size when standalone pooling is disabled. */
-    static final int DEFAULT_CLUSTER_MAX_TOTAL = 8;
+    /**
+     * Cluster internal per-node pool size used when pooling is disabled. When pooling is off,
+     * {@link ClusteredRedisConnection} builds a private, unshared {@code JedisCluster} used by a
+     * single execution and torn down immediately after (mirroring the standalone "no pooling" path) -
+     * so it never needs more than one live connection per node at a time, regardless of how many
+     * shards the cluster has.
+     */
+    static final int UNPOOLED_CLUSTER_MAX_TOTAL = 1;
 
     private final PropertyMap propertiesMap;
     private final String hosts;
@@ -135,7 +141,7 @@ public class RedisConnectionConfig {
                     + "'. The port must be an integer.", e);
         }
     }
-
+    
     /**
      * Stable identity for pool keying. Includes the stable credential material so that changing
      * credentials produces a different key — a new pool bound to the new credentials — while the
@@ -177,12 +183,14 @@ public class RedisConnectionConfig {
 
     /**
      * Maximum connections for JedisCluster's internal per-node pool. JedisCluster is always
-     * pooled, so this must be greater than zero even when the standalone "Enable Connection
-     * Pooling" toggle is off (that toggle governs only the standalone connection path). When
-     * pooling is enabled the configured Maximum Connections is used; otherwise a sane default.
+     * pooled, so this must be greater than zero even when "Enable Connection Pooling" is off. When
+     * pooling is enabled, the shared cluster client persists across executions (see
+     * {@link ClusteredRedisConnection}) and uses the configured Maximum Connections so concurrent
+     * executions can each borrow a connection; when disabled, the cluster client is rebuilt fresh per
+     * execution and never shared, so it only ever needs {@link #UNPOOLED_CLUSTER_MAX_TOTAL}.
      */
     public int getClusterMaxTotal() {
-        return poolSize > 0 ? poolSize : DEFAULT_CLUSTER_MAX_TOTAL;
+        return poolSize > 0 ? poolSize : UNPOOLED_CLUSTER_MAX_TOTAL;
     }
 
     public int getMinPoolSize() { return minPoolSize; }

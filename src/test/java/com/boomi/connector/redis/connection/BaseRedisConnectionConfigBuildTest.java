@@ -68,8 +68,10 @@ public class BaseRedisConnectionConfigBuildTest {
 
     @Test
     public void clusterPoolMaxTotalIsPositiveWhenPoolingDisabled() {
+        // A disabled-pooling cluster client is unshared and used by one execution at a time, so it
+        // only ever needs a single connection per node (see RedisConnectionConfig.UNPOOLED_CLUSTER_MAX_TOTAL).
         GenericObjectPoolConfig<Connection> pool = new ProbeConnection(config("None")).probePool();
-        assertEquals(8, pool.getMaxTotal());
+        assertEquals(1, pool.getMaxTotal());
         assertTrue("minIdle must not exceed maxTotal", pool.getMinIdle() <= pool.getMaxTotal());
     }
 
@@ -83,7 +85,7 @@ public class BaseRedisConnectionConfigBuildTest {
         when(ctx.getConnectionProperties()).thenReturn(props);
 
         GenericObjectPoolConfig<Connection> pool = new ProbeConnection(new RedisConnectionConfig(ctx)).probePool();
-        assertEquals(8, pool.getMaxTotal());
-        assertEquals("minIdle must be clamped to maxTotal", 8, pool.getMinIdle());
+        assertEquals(1, pool.getMaxTotal());
+        assertEquals("minIdle must be clamped to maxTotal", 1, pool.getMinIdle());
     }
 }

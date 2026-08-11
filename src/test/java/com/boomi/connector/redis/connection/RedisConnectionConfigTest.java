@@ -122,10 +122,12 @@ public class RedisConnectionConfigTest {
     }
 
     @Test
-    public void clusterMaxTotalDefaultsWhenPoolingDisabled() {
+    public void clusterMaxTotalIsOneWhenPoolingDisabled() {
+        // A disabled-pooling cluster client is unshared and rebuilt fresh per execution (see
+        // ClusteredRedisConnection), so it is only ever used by one execution at a time.
         RedisConnectionConfig config = new RedisConnectionConfig(contextWith("localhost:6379"));
         assertFalse(config.isPoolEnabled());
-        assertEquals(8, config.getClusterMaxTotal());
+        assertEquals(1, config.getClusterMaxTotal());
     }
 
     @Test
