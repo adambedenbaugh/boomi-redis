@@ -1,9 +1,11 @@
 package com.boomi.connector.redis;
 
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.boomi.connector.api.BrowseContext;
+import com.boomi.connector.api.ConnectorException;
 import com.boomi.connector.redis.connection.RedisConnectionInterface;
 import com.boomi.connector.redis.connection.RedisConnectionFactory;
 import com.boomi.connector.util.BaseConnection;
@@ -22,9 +24,11 @@ public class RedisConnection extends BaseConnection<BrowseContext> {
         if (redisClient == null) {
             try {
                 redisClient = RedisConnectionFactory.createConnection(getContext());
-                logger.info("RedisConnection initialized.");
             } catch (Exception e) {
-                throwException(e);
+                logger.log(Level.SEVERE, "Failed to initialize the Redis connection", e);
+                throw new ConnectorException("Could not initialize the Redis connection. Verify the "
+                        + "connection's Hosts, Clustering Policy, and Authentication settings. Cause: "
+                        + e.getMessage(), e);
             }
         }
     }
@@ -67,18 +71,6 @@ public class RedisConnection extends BaseConnection<BrowseContext> {
         if (redisClient != null) {
             redisClient.close();
             redisClient = null;
-        }
-    }
-
-    private void throwException(Throwable exception) {
-        Utils.<RuntimeException>throwException(exception, null);
-    }
-
-    // Utility class for exception handling
-    private static class Utils {
-        @SuppressWarnings("unchecked")
-        private static <T extends Throwable> void throwException(Throwable exception, Object dummy) throws T {
-            throw (T) exception;
         }
     }
 }
