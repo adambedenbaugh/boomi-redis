@@ -1,7 +1,7 @@
 package com.boomi.connector.redis;
 
 import com.boomi.connector.api.OperationType;
-import com.boomi.connector.redis.connection.ClusteredRedisConnection;
+import com.boomi.connector.redis.pool.RedisClientPoolManager;
 import com.boomi.connector.testutil.SimpleBrowseContext;
 import org.junit.*;
 import org.junit.experimental.categories.Category;
@@ -71,12 +71,12 @@ public class ClusterPipelineLeakGuardIT {
 
     @Before
     public void resetSharedClustersBefore() {
-        ClusteredRedisConnection.closeAllSharedClusters();
+        RedisClientPoolManager.closeAll();
     }
 
     @After
     public void resetSharedClustersAfter() {
-        ClusteredRedisConnection.closeAllSharedClusters();
+        RedisClientPoolManager.closeAll();
     }
 
     private static Container.ExecResult exec(String... cmd) throws Exception {

@@ -2,7 +2,6 @@ package com.boomi.connector.redis.pool;
 
 import com.boomi.util.ExecutorUtil;
 
-import java.io.Closeable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -81,7 +80,7 @@ public final class RedisClientPoolManager {
      * count; callers MUST balance with {@link #release(RedisClientSettings, Object)}.
      */
     @SuppressWarnings("unchecked")
-    public static <T extends Closeable> T acquire(RedisClientSettings settings, Supplier<T> clientBuilder) {
+    public static <T extends AutoCloseable> T acquire(RedisClientSettings settings, Supplier<T> clientBuilder) {
         Object lock = KEY_LOCKS.computeIfAbsent(settings, k -> new Object());
         synchronized (lock) {
             long now = System.currentTimeMillis();

@@ -21,7 +21,6 @@ public class RedisConnectionFactoryTest {
     @Before
     public void setUp() {
         RedisClientPoolManager.closeAll();
-        ClusteredRedisConnection.closeAllSharedClusters();
         factory = mock(JedisClientFactory.class);
         when(factory.createClient(any(HostAndPort.class), any(JedisClientConfig.class)))
                 .thenReturn(mock(Jedis.class));
@@ -36,7 +35,6 @@ public class RedisConnectionFactoryTest {
     @After
     public void tearDown() {
         RedisClientPoolManager.closeAll();
-        ClusteredRedisConnection.closeAllSharedClusters();
     }
 
     private RedisConnectionConfig config(String policy, boolean poolEnabled) {

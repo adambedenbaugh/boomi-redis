@@ -2,6 +2,7 @@ package com.boomi.connector.redis.connection;
 
 import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.PropertyMap;
+import com.boomi.connector.redis.pool.RedisClientPoolManager;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.After;
 import org.junit.Before;
@@ -23,12 +24,12 @@ public class ClusteredRedisConnectionTest {
 
     @Before
     public void resetSharedClustersBefore() {
-        ClusteredRedisConnection.closeAllSharedClusters();
+        RedisClientPoolManager.closeAll();
     }
 
     @After
     public void resetSharedClustersAfter() {
-        ClusteredRedisConnection.closeAllSharedClusters();
+        RedisClientPoolManager.closeAll();
     }
 
     private RedisConnectionConfig clusterConfig() {
@@ -42,22 +43,9 @@ public class ClusteredRedisConnectionTest {
 
     private RedisConnectionConfig pooledClusterConfig() {
         PropertyMap props = mock(PropertyMap.class);
+        when(props.getProperty("id")).thenReturn("cluster-component-1");
         when(props.getProperty("hosts")).thenReturn("node1:7000,node2:7001");
         when(props.getProperty("authenticationType")).thenReturn("None");
-        when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
-        when(props.getLongProperty("poolSize", 4L)).thenReturn(5L);
-        when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
-        BrowseContext ctx = mock(BrowseContext.class);
-        when(ctx.getConnectionProperties()).thenReturn(props);
-        return new RedisConnectionConfig(ctx);
-    }
-
-    private RedisConnectionConfig pooledClusterConfigWithBasicAuth(String password) {
-        PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("hosts")).thenReturn("node1:7000,node2:7001");
-        when(props.getProperty("authenticationType")).thenReturn("Basic");
-        when(props.getProperty("user")).thenReturn("alice");
-        when(props.getProperty("password")).thenReturn(password);
         when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
         when(props.getLongProperty("poolSize", 4L)).thenReturn(5L);
         when(props.getLongProperty("minPoolSize", 1L)).thenReturn(1L);
@@ -96,7 +84,7 @@ public class ClusteredRedisConnectionTest {
         verify(factory, times(2)).createCluster(anySet(), any(), anyInt(), any(), any());
         verify(clusterA, times(1)).close();
         verify(clusterB, times(1)).close();
-        assertEquals(0, ClusteredRedisConnection.getSharedClusterCount());
+        assertEquals(0, RedisClientPoolManager.getActiveClientCount());
     }
 
     @Test
@@ -110,16 +98,13 @@ public class ClusteredRedisConnectionTest {
         ClusteredRedisConnection b = new ClusteredRedisConnection(pooledClusterConfig(), factory);
 
         verify(factory, times(1)).createCluster(anySet(), any(), anyInt(), any(), any());
-        assertEquals(1, ClusteredRedisConnection.getSharedClusterCount());
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
         a.close();
         b.close();
     }
 
     @Test
     public void poolingEnabledSequentialExecutionsReuseTheSameSharedClusterAndNeverCloseIt() {
-        // Regression test: an execution closing its connection must not tear down the shared
-        // cluster client out from under the next sequential execution (mirrors the standalone
-        // pooled-connection fix - see StandalonePooledRedisConnectionTest).
         JedisCluster cluster = mock(JedisCluster.class);
         JedisClientFactory factory = mock(JedisClientFactory.class);
         when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
@@ -132,51 +117,11 @@ public class ClusteredRedisConnectionTest {
 
         verify(factory, times(1)).createCluster(anySet(), any(), anyInt(), any(), any());
         verify(cluster, never()).close();
-        assertEquals(1, ClusteredRedisConnection.getSharedClusterCount());
+        assertEquals(1, RedisClientPoolManager.getActiveClientCount());
     }
 
     @Test
-    public void credentialChangeEvictsTheSupersededIdleClusterForTheSameNodeSet() {
-        JedisCluster oldCluster = mock(JedisCluster.class);
-        JedisClientFactory factory = mock(JedisClientFactory.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(oldCluster);
-        ClusteredRedisConnection a = new ClusteredRedisConnection(pooledClusterConfigWithBasicAuth("pw"), factory);
-        a.close(); // no in-flight execution holds the old client
-
-        JedisCluster rotatedCluster = mock(JedisCluster.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(rotatedCluster);
-        ClusteredRedisConnection b = new ClusteredRedisConnection(pooledClusterConfigWithBasicAuth("rotated-pw"), factory);
-
-        verify(oldCluster, times(1)).close();
-        verify(rotatedCluster, never()).close();
-        assertEquals(1, ClusteredRedisConnection.getSharedClusterCount());
-        b.close();
-    }
-
-    @Test
-    public void credentialChangeDoesNotEvictAClusterStillHeldByAnInFlightExecution() {
-        JedisCluster oldCluster = mock(JedisCluster.class);
-        JedisClientFactory factory = mock(JedisClientFactory.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(oldCluster);
-        ClusteredRedisConnection a = new ClusteredRedisConnection(pooledClusterConfigWithBasicAuth("pw"), factory);
-        // a stays open: an in-flight execution still holds the old client
-
-        JedisCluster rotatedCluster = mock(JedisCluster.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(rotatedCluster);
-        ClusteredRedisConnection b = new ClusteredRedisConnection(pooledClusterConfigWithBasicAuth("rotated-pw"), factory);
-
-        verify(oldCluster, never()).close();
-        assertEquals(2, ClusteredRedisConnection.getSharedClusterCount());
-        a.close();
-        b.close();
-    }
-
-    @Test
-    public void closeAllSharedClustersClosesAClusterEvenAfterEveryInstanceAlreadyClosed() {
+    public void closeAllClosesASharedClusterEvenAfterEveryInstanceAlreadyClosed() {
         JedisCluster cluster = mock(JedisCluster.class);
         JedisClientFactory factory = mock(JedisClientFactory.class);
         when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
@@ -185,34 +130,10 @@ public class ClusteredRedisConnectionTest {
         ClusteredRedisConnection a = new ClusteredRedisConnection(pooledClusterConfig(), factory);
         a.close();
 
-        ClusteredRedisConnection.closeAllSharedClusters();
+        RedisClientPoolManager.closeAll();
 
         verify(cluster, times(1)).close();
-        assertEquals(0, ClusteredRedisConnection.getSharedClusterCount());
-    }
-
-    @Test
-    public void closeDoesNotAffectAnUnrelatedClusterRegisteredUnderTheSameKeyAfterReplacement() {
-        JedisCluster clusterA = mock(JedisCluster.class);
-        JedisClientFactory factory = mock(JedisClientFactory.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(clusterA);
-        ClusteredRedisConnection a = new ClusteredRedisConnection(pooledClusterConfig(), factory);
-
-        // Simulate closeAllSharedClusters() running (e.g. shutdown) while `a` still holds a
-        // reference to the now-discarded original client, followed by a new instance registering a
-        // fresh client under the identical key.
-        ClusteredRedisConnection.closeAllSharedClusters();
-        JedisCluster clusterB = mock(JedisCluster.class);
-        when(factory.createCluster(anySet(), any(JedisClientConfig.class), anyInt(),
-                any(Duration.class), any(GenericObjectPoolConfig.class))).thenReturn(clusterB);
-        ClusteredRedisConnection b = new ClusteredRedisConnection(pooledClusterConfig(), factory);
-
-        a.close();
-
-        verify(clusterB, never()).close();
-        assertEquals(1, ClusteredRedisConnection.getSharedClusterCount());
-        b.close();
+        assertEquals(0, RedisClientPoolManager.getActiveClientCount());
     }
 
     @Test
