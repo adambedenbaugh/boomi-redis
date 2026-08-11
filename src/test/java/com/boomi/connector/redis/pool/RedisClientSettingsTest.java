@@ -14,7 +14,6 @@ public class RedisClientSettingsTest {
     /** Builds a config from a fully-stubbed PropertyMap; individual tests override single stubs. */
     private static PropertyMap baseProps() {
         PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("id")).thenReturn("component-1");
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getBooleanProperty("useSSL", Boolean.FALSE)).thenReturn(false);
         when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
@@ -59,18 +58,6 @@ public class RedisClientSettingsTest {
         RedisClientSettings b = settings(baseProps());
         assertEquals(a, b);
         assertEquals(a.hashCode(), b.hashCode());
-    }
-
-    @Test
-    public void differentConnectionIdsAreNotEqual() {
-        // Best-effort: connectionId participates in equality WHEN supplied, so id-based isolation
-        // activates automatically if a future runtime provides the id. Today's Atom runtime
-        // injects no "id" connection property (verified 2026-08-11), so in production the id is
-        // always "" and identity is effectively the connection's field values only - the same
-        // keying Boomi's official JMS V2 connector uses.
-        PropertyMap other = baseProps();
-        when(other.getProperty("id")).thenReturn("component-2");
-        assertNotEquals(settings(baseProps()), settings(other));
     }
 
     @Test

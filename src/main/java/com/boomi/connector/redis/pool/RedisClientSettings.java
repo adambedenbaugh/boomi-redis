@@ -20,10 +20,9 @@ import java.util.Objects;
  *       idles out via {@link RedisClientPoolManager}'s eviction.</li>
  *   <li>Two connection components with byte-identical settings share one client. This is benign
  *       (identical settings means the same endpoint and the same credentials) and matches the JMS
- *       V2 behavior. A best-effort {@code connectionId} participates in equality, but the Atom
- *       runtime supplies no component id (verified 2026-08-11 - see
- *       {@link RedisConnectionConfig#getConnectionId()}), so it is "" in production; per-component
- *       isolation activates automatically if a future runtime ever provides the id.</li>
+ *       V2 behavior. Keying on the connection component id was considered but is impossible: no
+ *       public SDK API exposes it and the Atom runtime injects no id-like connection property
+ *       (verified 2026-08-11 against connector-sdk-api 2.22.1/2.25.0 and a live Atom).</li>
  *   <li>The rotating Entra access token is deliberately NOT part of the identity - only the stable
  *       OAuth fields (client id, client secret, token URL) are - so token refresh keeps reusing
  *       the same pool.</li>
@@ -35,7 +34,6 @@ import java.util.Objects;
  */
 public final class RedisClientSettings {
 
-    private final String connectionId;
     private final String hosts;
     private final boolean useSSL;
     private final ClusteringPolicy clusteringPolicy;
@@ -54,7 +52,6 @@ public final class RedisClientSettings {
     private final int maxWaitTime;
 
     public RedisClientSettings(RedisConnectionConfig config) {
-        this.connectionId = config.getConnectionId();
         this.hosts = config.getHosts();
         this.useSSL = config.isSSLEnabled();
         this.clusteringPolicy = config.getClusteringPolicy();
@@ -105,7 +102,6 @@ public final class RedisClientSettings {
                 && maxWaitTime == other.maxWaitTime
                 && clusteringPolicy == other.clusteringPolicy
                 && authenticationType == other.authenticationType
-                && Objects.equals(connectionId, other.connectionId)
                 && Objects.equals(hosts, other.hosts)
                 && Objects.equals(username, other.username)
                 && Objects.equals(password, other.password)
@@ -116,18 +112,13 @@ public final class RedisClientSettings {
 
     @Override
     public int hashCode() {
-        return Objects.hash(connectionId, hosts, useSSL, clusteringPolicy, authenticationType,
+        return Objects.hash(hosts, useSSL, clusteringPolicy, authenticationType,
                 username, password, entraClientId, entraClientSecret, entraAccessTokenUrl,
                 connectionTimeoutMillis, socketTimeoutMillis, poolEnabled, poolSize, minPoolSize,
                 maxIdleTime, maxWaitTime);
     }
 
-    /**
-     * Redacting: identifies the client without exposing credentials. Safe to log.
-     * {@code connectionId} is deliberately omitted - the Atom runtime never supplies it, so it
-     * would render as a confusing {@code connectionId=''} in every pool log line. (It still
-     * participates in {@link #equals}/{@link #hashCode}.)
-     */
+    /** Redacting: identifies the client without exposing credentials. Safe to log. */
     @Override
     public String toString() {
         return "RedisClientSettings{hosts='" + hosts

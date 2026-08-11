@@ -43,7 +43,6 @@ public class ClusteredRedisConnectionTest {
 
     private RedisConnectionConfig pooledClusterConfig() {
         PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("id")).thenReturn("cluster-component-1");
         when(props.getProperty("hosts")).thenReturn("node1:7000,node2:7001");
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);

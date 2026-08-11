@@ -38,7 +38,6 @@ public class StandalonePooledRedisConnectionTest {
 
     private RedisConnectionConfig basicConfig() {
         PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("id")).thenReturn("component-1");
         when(props.getProperty("hosts")).thenReturn("localhost:6379");
         when(props.getProperty("authenticationType")).thenReturn("Basic");
         when(props.getProperty("user")).thenReturn("alice");

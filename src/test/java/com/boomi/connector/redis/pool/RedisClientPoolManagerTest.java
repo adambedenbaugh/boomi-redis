@@ -26,10 +26,10 @@ public class RedisClientPoolManagerTest {
         RedisClientPoolManager.closeAll();
     }
 
-    private static RedisClientSettings settings(String componentId) {
+    /** Builds settings keyed by the given hosts value - distinct hosts means a distinct pool key. */
+    private static RedisClientSettings settings(String hosts) {
         PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("id")).thenReturn(componentId);
-        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("hosts")).thenReturn(hosts);
         when(props.getProperty("authenticationType")).thenReturn("None");
         when(props.getBooleanProperty("poolEnabled", Boolean.FALSE)).thenReturn(true);
         when(props.getLongProperty("poolSize", 4L)).thenReturn(4L);
@@ -39,10 +39,9 @@ public class RedisClientPoolManagerTest {
         return new RedisClientSettings(new RedisConnectionConfig(ctx));
     }
 
-    private static RedisClientSettings settingsWithPassword(String componentId, String password) {
+    private static RedisClientSettings settingsWithPassword(String hosts, String password) {
         PropertyMap props = mock(PropertyMap.class);
-        when(props.getProperty("id")).thenReturn(componentId);
-        when(props.getProperty("hosts")).thenReturn("localhost:6379");
+        when(props.getProperty("hosts")).thenReturn(hosts);
         when(props.getProperty("authenticationType")).thenReturn("Basic");
         when(props.getProperty("user")).thenReturn("alice");
         when(props.getProperty("password")).thenReturn(password);
@@ -76,7 +75,7 @@ public class RedisClientPoolManagerTest {
     }
 
     @Test
-    public void differentComponentIdsGetIndependentClients() {
+    public void differentSettingsGetIndependentClients() {
         Closeable clientA = mock(Closeable.class);
         Closeable clientB = mock(Closeable.class);
 

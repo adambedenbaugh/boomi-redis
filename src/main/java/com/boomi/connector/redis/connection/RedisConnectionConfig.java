@@ -26,7 +26,6 @@ public class RedisConnectionConfig {
 
     private final PropertyMap propertiesMap;
     private final String hosts;
-    private final String connectionId;
     private final boolean useSSL;
     private final boolean poolEnabled;
     private final int connectionTimeout;
@@ -53,16 +52,6 @@ public class RedisConnectionConfig {
         if (hosts == null || hosts.isEmpty()) {
             throw new IllegalArgumentException("Host is empty");
         }
-
-        // Best-effort read of a connection component id. The SDK docs' operation sample shows
-        // getConnectionProperties().getProperty("id"), but a real Atom (verified 2026-08-11 by
-        // logging the property key set) injects NO id-like key, and no public SDK API exposes the
-        // component id either (verified against connector-sdk-api 2.22.1 and 2.25.0). So this is
-        // "" at runtime today and the shared-client identity is effectively the connection's field
-        // values only - the same keying Boomi's official JMS V2 connector uses. Kept in the key
-        // so id-based isolation activates automatically if a future runtime ever supplies it.
-        String id = propertiesMap.getProperty("id");
-        this.connectionId = (id == null) ? "" : id;
 
         this.useSSL = propertiesMap.getBooleanProperty("useSSL", Boolean.FALSE);
         this.poolEnabled = propertiesMap.getBooleanProperty("poolEnabled", Boolean.FALSE);
@@ -156,11 +145,6 @@ public class RedisConnectionConfig {
     // Getters
     public String getHosts() { return hosts; }
 
-    /**
-     * Best-effort Boomi connection component id — "" when the runtime does not supply an "id"
-     * connection property, which (as of Atom runtime verified 2026-08-11) is always.
-     */
-    public String getConnectionId() { return connectionId; }
     public boolean isSSLEnabled() { return useSSL; }
     public int getConnectionTimeout() { return connectionTimeout; }
     public int getSocketTimeout() { return socketTimeout; }
