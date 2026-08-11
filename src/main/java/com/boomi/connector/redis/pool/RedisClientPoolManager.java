@@ -25,6 +25,27 @@ import java.util.logging.Logger;
  * would stall every unrelated acquisition behind one slow cluster build. This manager locks
  * per-settings instead; the evictor takes the same per-settings lock before closing an entry, so
  * an in-flight acquire and the evictor can never race on the same client.
+ *
+ * <p><b>Lock objects in {@code KEY_LOCKS} are never removed</b>, including by the evictor and by
+ * {@link #closeAll()} - only {@code ACTIVE_CLIENTS} entries are removed/cleared. This is
+ * deliberate: once {@code KEY_LOCKS.computeIfAbsent(settings, ...)} creates the lock object for a
+ * given {@link RedisClientSettings}, that exact object is the monitor every future
+ * {@link #acquire}/evictor pass for that key will synchronize on, for the rest of the JVM's life.
+ * An earlier version removed the {@code KEY_LOCKS} entry alongside the {@code ACTIVE_CLIENTS}
+ * entry when an evicted client was closed; that made the per-key mutual exclusion depend on a
+ * subtle cross-map happens-before argument (that a thread observing the {@code KEY_LOCKS} miss
+ * also observes the prior {@code ACTIVE_CLIENTS} removal) to guarantee a concurrent
+ * {@link #acquire} landing in that window couldn't obtain a different lock object than the
+ * evictor was holding. That argument is very likely correct given
+ * {@code ConcurrentHashMap}'s documented memory-consistency effects and
+ * {@code computeIfAbsent}'s per-key atomicity, but it is not something a future change to this
+ * class - or a future maintainer - can verify at a glance. Never removing the lock object removes
+ * the argument's premise entirely: there is only ever one lock instance per settings key, so
+ * there is no window in which two different lock objects can exist for it. The cost is a
+ * {@code KEY_LOCKS} entry that outlives its {@code ACTIVE_CLIENTS} entry, bounded by the number of
+ * distinct {@link RedisClientSettings} ever seen in the JVM's lifetime (i.e. distinct Boomi
+ * connection components times their distinct configuration states over time) - not unbounded in
+ * practice.
  */
 public final class RedisClientPoolManager {
 
@@ -95,7 +116,9 @@ public final class RedisClientPoolManager {
     /**
      * Closes and removes every expired client. Called by the scheduled evictor; package-visible so
      * tests can drive it deterministically with a chosen clock value. Mirrors the JMS evictor
-     * body: close if expired-and-not-closed, then remove if closed.
+     * body: close if expired-and-not-closed, then remove if closed. Deliberately does NOT remove
+     * the {@code KEY_LOCKS} entry - see the class Javadoc for why the lock object must outlive the
+     * {@code ACTIVE_CLIENTS} entry it guards.
      */
     static void runEviction(long nowMillis) {
         for (Map.Entry<RedisClientSettings, ManagedClient> entry : ACTIVE_CLIENTS.entrySet()) {
@@ -110,7 +133,6 @@ public final class RedisClientPoolManager {
                     }
                     if (managed.closed) {
                         ACTIVE_CLIENTS.remove(entry.getKey(), managed);
-                        KEY_LOCKS.remove(entry.getKey(), lock);
                     }
                 } catch (Exception e) {
                     LOG.severe("Unable to evict Redis client for " + entry.getKey() + ": " + e.getMessage());
@@ -122,7 +144,8 @@ public final class RedisClientPoolManager {
     /**
      * Closes all shared clients regardless of references or age. For shutdown and test teardown
      * only. Contract: callers must be effectively single-threaded (no concurrent acquires) - this
-     * clears both maps without taking the per-settings locks.
+     * clears {@code ACTIVE_CLIENTS} without taking the per-settings locks. {@code KEY_LOCKS} is
+     * deliberately left untouched - see the class Javadoc.
      */
     public static void closeAll() {
         for (Map.Entry<RedisClientSettings, ManagedClient> entry : ACTIVE_CLIENTS.entrySet()) {
@@ -131,7 +154,6 @@ public final class RedisClientPoolManager {
             managed.closeQuietly();
         }
         ACTIVE_CLIENTS.clear();
-        KEY_LOCKS.clear();
     }
 
     /** Number of registered shared clients. Diagnostics/monitoring. */
@@ -143,5 +165,15 @@ public final class RedisClientPoolManager {
     static int getActiveReferences(RedisClientSettings settings) {
         ManagedClient managed = ACTIVE_CLIENTS.get(settings);
         return managed == null ? -1 : managed.activeReferences.get();
+    }
+
+    /**
+     * Test-only introspection: the lock object currently registered for {@code settings}, or
+     * {@code null} if {@link #acquire} has never been called for it. Package-visible so tests can
+     * assert the lock object's identity is stable across an eviction/rebuild cycle - the invariant
+     * this class's thread-safety now relies on (see class Javadoc).
+     */
+    static Object getLockObject(RedisClientSettings settings) {
+        return KEY_LOCKS.get(settings);
     }
 }

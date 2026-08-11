@@ -8,6 +8,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.Closeable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
@@ -146,5 +147,48 @@ public class RedisClientPoolManagerTest {
     @Test
     public void getActiveReferencesReturnsMinusOneForUnknownSettings() {
         assertEquals(-1, RedisClientPoolManager.getActiveReferences(settings("never-acquired")));
+    }
+
+    /**
+     * Pins the invariant the evictor's thread-safety now relies on (see the class Javadoc on
+     * {@code RedisClientPoolManager}): the lock object registered for a settings key is created
+     * exactly once and is never removed, so an eviction can never leave behind a "gap" where a
+     * concurrent acquire() would synchronize on a different monitor than the evictor holds. Not a
+     * true concurrent stress test, but it does exercise the real eviction path end to end (via
+     * the package-visible {@code runEviction} hook) and asserts on the lock object's identity
+     * directly, rather than only on its externally observable effects.
+     */
+    @Test
+    public void lockObjectIdentityIsStableAcrossEvictionAndRebuild() throws Exception {
+        RedisClientSettings settings = settings("comp-1");
+        Closeable client1 = mock(Closeable.class);
+
+        Closeable acquired1 = RedisClientPoolManager.acquire(settings, () -> client1);
+        Object lockBeforeEviction = RedisClientPoolManager.getLockObject(settings);
+        assertNotNull("acquire() must register a lock object for the settings key", lockBeforeEviction);
+
+        RedisClientPoolManager.release(settings, acquired1);
+        assertEquals(0, RedisClientPoolManager.getActiveReferences(settings));
+
+        // Drive the evictor far enough past CLIENT_EXPIRATION_INTERVAL_MILLIS to close client1.
+        long farFuture = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(31);
+        RedisClientPoolManager.runEviction(farFuture);
+
+        verify(client1).close();
+        assertEquals("the evicted entry must be gone from ACTIVE_CLIENTS",
+                -1, RedisClientPoolManager.getActiveReferences(settings));
+
+        Object lockAfterEviction = RedisClientPoolManager.getLockObject(settings);
+        assertSame("the lock object must survive eviction unchanged - a new/different lock object "
+                        + "here would mean a concurrent acquire() could synchronize on a monitor "
+                        + "the evictor was never holding",
+                lockBeforeEviction, lockAfterEviction);
+
+        Closeable client2 = mock(Closeable.class);
+        Closeable acquired2 = RedisClientPoolManager.acquire(settings, () -> client2);
+
+        assertSame("acquire() after eviction must rebuild with a fresh client", client2, acquired2);
+        assertSame("acquire() after eviction must reuse the very same lock object",
+                lockBeforeEviction, RedisClientPoolManager.getLockObject(settings));
     }
 }
