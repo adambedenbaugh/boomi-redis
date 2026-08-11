@@ -29,7 +29,11 @@ every entry whose key matches the configured prefix.
 stripped from the key names in the response. Default is selected (`true`).
 
 **Throw Exception when not found** — When enabled, a missing key returns a failure
-instead of an empty result. Default is cleared (`false`).
+instead of an empty result. Default is cleared (`false`). This also applies to a
+get-all (`*`): when no keys match the prefix, the operation returns a failure if
+this option is enabled, and a success with **no output document** if it is
+disabled. (Versions before 1.0.1 ignored this option for get-all and returned an
+empty `[]` document on no matches.)
 
 ### Response profile
 
