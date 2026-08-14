@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
 
+## [1.2.0] - 2026-08-14
+
+### Changed
+- Upgraded the Boomi Connector SDK from 2.22.1 to 2.30.1 (`ResponseUtil` moved to
+  `com.boomi.connector.util`; no behavior change).
+
+### Tests
+- Integration tests are now fully self-contained: every test spins up its own throwaway Redis
+  via Testcontainers, so Docker is the only prerequisite — no properties files, no live
+  endpoints, no credentials on disk. The two legacy live-endpoint tests were replaced with
+  Testcontainers equivalents that drive UPSERT/GET through the SDK's `ConnectorTester` harness
+  for both Basic and Microsoft Entra authentication.
+- Added a TLS integration test: a per-run self-signed certificate (generated with the JDK's
+  keytool, trusted via runtime `SSLContext` injection) proves `useSSL` end-to-end against a
+  TLS-only Redis, including a negative control showing plaintext connections are rejected.
+- The browse test no longer needs Docker or config files and runs with the unit suite.
+
 ## [1.1.0] - 2026-08-14
 
 ### Added
