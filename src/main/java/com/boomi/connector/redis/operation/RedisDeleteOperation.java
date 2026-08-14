@@ -9,7 +9,7 @@ import com.boomi.connector.api.ObjectIdData;
 import com.boomi.connector.api.OperationContext;
 import com.boomi.connector.api.OperationResponse;
 import com.boomi.connector.api.OperationStatus;
-import com.boomi.connector.api.ResponseUtil;
+import com.boomi.connector.util.ResponseUtil;
 import com.boomi.connector.redis.RedisConnection;
 import com.boomi.connector.util.BaseDeleteOperation;
 
