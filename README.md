@@ -38,7 +38,7 @@ The **Hosts** field takes a single `host:port` endpoint for **Single Endpoint**;
 
 ## Connector Architecture
 
-- **SDK**: Boomi Connector SDK 2.22.1
+- **SDK**: Boomi Connector SDK 2.30.1
 - **Redis client**: Jedis 5.2.0 (Redis 6+ compatible)
 - **Build**: Gradle with `com.boomi.connector` plugin
 
@@ -56,9 +56,9 @@ This produces the connector archive and copies the descriptor to `build/connecto
 ./gradlew test
 ```
 
-### Run integration tests (requires live Redis)
+### Run integration tests (requires Docker)
 
-Copy the relevant properties file template from `src/test/resources/` and populate it with your connection details, then:
+The integration tests are fully self-contained — they spin up throwaway Redis containers via Testcontainers, so all you need is Docker running:
 
 ```bash
 ./gradlew integrationTest

@@ -27,7 +27,7 @@ For the top-level project overview, see the [project README](../README.md).
 | **Deployment modes** | Standalone · connection-pooled standalone · clustered |
 | **Clustering Policy** | Single Endpoint · OSS Cluster |
 | **SSL/TLS** | Configurable; required for Azure Cache for Redis (port 6380) |
-| **Connector SDK** | Boomi Connector SDK 2.22.1 |
+| **Connector SDK** | Boomi Connector SDK 2.30.1 |
 | **Redis client** | Jedis 5.2.0 (Redis 6+ compatible) |
 | **Language / build** | Java 8 · Gradle (`com.boomi.connector` plugin) |
 
@@ -49,10 +49,10 @@ artifacts to `build/connector-upload/`:
 ./gradlew test
 ```
 
-### Run integration tests (requires live Redis or Docker)
+### Run integration tests (requires Docker)
 
-Copy the relevant properties template from `src/test/resources/` and populate it
-with your connection details, then:
+The integration tests are fully self-contained — they spin up throwaway Redis
+containers via Testcontainers, so all you need is Docker running:
 
 ```bash
 ./gradlew integrationTest
@@ -73,8 +73,8 @@ Optionally update the connector icon — see
 
 ## External references
 
-- Boomi Connector SDK 2.22.1 Javadoc —
-  https://boomisdkjavadoc.s3.amazonaws.com/javadoc/2.22.1/index.html
+- Boomi Connector SDK 2.30.1 Javadoc —
+  https://boomisdkjavadoc.s3.amazonaws.com/javadoc/2.30.1/index.html
 - Jedis (Redis Java client) — https://github.com/redis/jedis
 - Azure Cache for Redis with Microsoft Entra ID —
   https://learn.microsoft.com/azure/azure-cache-for-redis/cache-azure-active-directory-for-authentication

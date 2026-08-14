@@ -130,37 +130,13 @@ excluded from the normal `test` run and only execute when you ask for them:
 ./gradlew integrationTest
 ```
 
-There are **two kinds**, and they get their Redis differently:
+Every integration test uses **Testcontainers** — it spins up a throwaway Redis
+in Docker automatically (including ACL users for the Basic and Microsoft Entra
+auth tests), so the only prerequisite is **Docker Desktop running**. No config
+files, no credentials, no external Redis.
 
-**a) Testcontainers tests** (e.g. [RedisEntraPoolingIT](../src/test/java/com/boomi/connector/redis/RedisEntraPoolingIT.java))
-spin up a throwaway Redis in Docker automatically. For these you just need
-**Docker Desktop running** — no config files.
-
-**b) Live-Redis tests** (e.g. [CacheConnectorBasicAuthGetTest](../src/test/java/com/boomi/connector/redis/CacheConnectorBasicAuthGetTest.java))
-connect to a Redis *you* point them at, using a properties file. To set one up:
-
-1. Copy the template and drop the `.example` suffix:
-
-   ```powershell
-   # Windows PowerShell
-   Copy-Item src\test\resources\basicAuth.properties.example src\test\resources\basicAuth.properties
-   ```
-   ```bash
-   # macOS / Linux
-   cp src/test/resources/basicAuth.properties.example src/test/resources/basicAuth.properties
-   ```
-
-2. Open the new `basicAuth.properties` and fill in your Redis host and
-   credentials (`redis.host`, `redis.user`, `redis.password`, …). For Azure /
-   Entra tests, do the same with `msEntraAuth.properties.example`.
-
-> **Never commit the real `.properties` files** — only the `.example` templates
-> belong in Git. The real ones are already git-ignored because they hold
-> credentials.
-
-If you don't have Docker running or haven't created the properties files, those
-integration tests will fail or be skipped — that's expected. The build and unit
-tests are unaffected.
+If you don't have Docker running, the integration tests will fail — that's
+expected. The build and unit tests are unaffected.
 
 ---
 
@@ -208,7 +184,7 @@ Redis with Microsoft Entra, pooling, and TTL — see the
 | `'gradlew' is not recognized` / `command not found` | You're not in the project root, or you dropped the `./` (mac/Linux) or `.\` (Windows) prefix. Run from the folder containing `gradlew`. |
 | Build fails compiling, mentions a Java version | You have a JRE, not a JDK, or a very old JDK. Install JDK 8+ ([Temurin](https://adoptium.net/)) and re-run. |
 | First build hangs or is very slow | Normal on the first run — it's downloading Gradle and libraries. Let it finish; it's cached afterward. |
-| `integrationTest` fails with a Docker/connection error | Docker Desktop isn't running (for Testcontainers tests), or your `*.properties` file is missing/incorrect (for live-Redis tests). |
+| `integrationTest` fails with a Docker/connection error | Docker Desktop isn't running — the integration tests need it to spin up their throwaway Redis containers. |
 | A test fails and you want details | Open `build/reports/tests/test/index.html`, or add `--info` to the command for more console output. |
 | Stale or weird build state | Run `./gradlew clean` then build again. |
 
@@ -218,5 +194,5 @@ Redis with Microsoft Entra, pooling, and TTL — see the
 
 - [Main README](../README.md) — full reference for every connection field and
   operation, plus the Azure / Microsoft Entra setup walkthrough.
-- Boomi Connector SDK 2.22.1 Javadoc:
-  https://boomisdkjavadoc.s3.amazonaws.com/javadoc/2.22.1/index.html
+- Boomi Connector SDK 2.30.1 Javadoc:
+  https://boomisdkjavadoc.s3.amazonaws.com/javadoc/2.30.1/index.html
