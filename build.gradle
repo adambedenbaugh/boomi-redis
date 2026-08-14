@@ -25,7 +25,7 @@ base {
     archivesName = 'BoomiRedisConnector'
 }
 group = 'com.boomi.connector.redis'
-version = '1.0.1'
+version = '1.1.0'
 
 ext {
     sdkBoomiVersion = '2.22.1'
