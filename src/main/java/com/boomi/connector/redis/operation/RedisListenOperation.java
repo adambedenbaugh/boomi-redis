@@ -123,11 +123,12 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             // blocking Jedis socket read (blpop() reads from a plain java.net.Socket, not an
             // interruptible NIO channel). The join timeout below is what actually guarantees
             // correctness: it must always outlast the poll thread's current in-flight blocking
-            // call (bounded by pollBlockSeconds) so join() returns because the thread genuinely
-            // terminated -- not because it timed out while still reading from the connection we
-            // are about to close.
+            // call (bounded by pollBlockSeconds) -- and, in Stream ack-on-completion mode, the
+            // in-flight future.get(ackWaitTimeoutMs, ...) wait in submitStreamMessage() -- so
+            // join() returns because the thread genuinely terminated -- not because it timed out
+            // while the poll thread is still using the connection we are about to close.
             pollThread.interrupt();
-            long joinTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
+            long joinTimeoutMs = computeJoinTimeoutMs();
             try {
                 pollThread.join(joinTimeoutMs);
             } catch (InterruptedException e) {
@@ -139,6 +140,27 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             redisConnection.close();
             redisConnection = null;
         }
+    }
+
+    /**
+     * Computes how long {@link #stop()} should wait on {@code pollThread.join(...)}.
+     *
+     * <p>The base budget covers the Redis-side blocking call ({@code blpop}/{@code xreadGroup}),
+     * sized from {@code pollBlockSeconds} with a floor of 10s and a 5s safety margin. In Stream
+     * mode with ack-on-completion, the poll thread can also be parked in
+     * {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
+     * a second, independent source of in-flight blocking that the base budget knows nothing
+     * about. When that mode is active, the join timeout must cover whichever of the two the poll
+     * thread might currently be inside, so it is the max of both components (each with its own
+     * 5s safety margin).
+     */
+    private long computeJoinTimeoutMs() {
+        long redisBlockTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
+        if (STREAM.equals(queueType) && ackOnCompletion) {
+            long ackWaitBudgetMs = ackWaitTimeoutMs + 5_000L;
+            return Math.max(redisBlockTimeoutMs, ackWaitBudgetMs);
+        }
+        return redisBlockTimeoutMs;
     }
 
     private void runPollLoop() {
@@ -192,17 +214,14 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * waiting past that point buys nothing, since the still-unacked message becomes eligible for
      * Task 8's reclaim sweep at that same threshold regardless.
      *
-     * <p><b>Known limitation:</b> this bounds the wait, but does not change {@code stop()}'s
-     * join-timeout formula, which was intentionally left untouched for this task (it was just fixed
-     * for the unrelated Redis-blocking-call bug and re-touching it here was out of scope). That
-     * formula sizes its budget only from {@code pollBlockSeconds}, so if {@code ackWaitTimeoutMs}
-     * exceeds that budget, {@code stop()} can still return (its {@code join()} call times out) while
-     * this thread is inside this bounded wait for an in-flight submission. That is strictly better
-     * than the unbounded case (the thread is now guaranteed to finish within {@code ackWaitTimeoutMs}
-     * and release the connection reference on its own), but a caller invoking {@code stop()} is not
-     * guaranteed the poll thread has already terminated in that window. Recommended follow-up: have
-     * {@code stop()} add {@code ackWaitTimeoutMs} to its join budget when Stream mode + ack-on-
-     * completion is active.
+     * <p><b>Interaction with {@code stop()}'s join timeout:</b> {@link #computeJoinTimeoutMs()}
+     * extends {@code stop()}'s {@code pollThread.join(...)} budget to also cover this bounded wait
+     * when Stream mode + ack-on-completion is active, so {@code stop()} does not race ahead and
+     * tear down {@code redisConnection} while this thread is still parked here under normal
+     * timing. As defense in depth for the case where {@code stop()} is invoked with an
+     * even-slower-than-expected process (or is itself given a shorter-than-expected caller-side
+     * deadline), the success branch below null-checks {@code redisConnection} before calling
+     * {@code xack} rather than assuming it is still present -- see the guard below.
      */
     void submitStreamMessage(RedisStreamMessage message) {
         String json = toJson(message.getId(), message.getValue());
@@ -212,7 +231,20 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 ListenerExecutionResult result = future.get(ackWaitTimeoutMs, TimeUnit.MILLISECONDS);
                 if (result.isSuccess()) {
-                    redisConnection.xack(queueKey, consumerGroupName, message.getId());
+                    // stop() may have raced ahead and torn down redisConnection while this thread
+                    // was parked in future.get() above (e.g. stop() invoked with an
+                    // even-slower-than-expected process, beyond what computeJoinTimeoutMs()
+                    // budgeted for). Read the volatile field once into a local so the null-check
+                    // and the use below observe the same value.
+                    RedisConnection connection = redisConnection;
+                    if (connection != null) {
+                        connection.xack(queueKey, consumerGroupName, message.getId());
+                    } else {
+                        logger.warning("Cannot acknowledge stream message " + message.getId() + " on "
+                                + queueKey + ": the Redis connection was already closed by stop() while "
+                                + "this process execution was in flight. The message remains "
+                                + "unacknowledged and is eligible for reclaim.");
+                    }
                 } else {
                     logger.warning("Process execution failed for stream message " + message.getId()
                             + " on " + queueKey + "; leaving unacknowledged for reclaim.");
