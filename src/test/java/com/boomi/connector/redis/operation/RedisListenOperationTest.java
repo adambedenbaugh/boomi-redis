@@ -150,7 +150,21 @@ public class RedisListenOperationTest {
     }
 
     private OperationContext streamContext(String ackMode) {
-        return streamContext(ackMode, 1000L);
+        PropertyMap connProps = mock(PropertyMap.class);
+        when(connProps.getProperty("consumerGroupName")).thenReturn("mygroup");
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
+        when(opProps.getProperty("queue_key", "")).thenReturn("s");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getProperty("ack_mode", "OnCompletion")).thenReturn(ackMode);
+        when(opProps.getLongProperty("idle_reclaim_timeout_ms", 60000L)).thenReturn(50L);
+        when(opProps.getLongProperty("max_delivery_attempts", 5L)).thenReturn(3L);
+        when(opProps.getProperty("dead_letter_key", "")).thenReturn("");
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+        when(ctx.getConnectionProperties()).thenReturn(connProps);
+        return ctx;
     }
 
     private OperationContext streamContext(String ackMode, long idleReclaimTimeoutMs) {
@@ -386,6 +400,68 @@ public class RedisListenOperationTest {
                     + stopElapsedMs + "ms (expected >= 11000ms)", stopElapsedMs >= 11_000L);
             verify(mocked.constructed().get(0), times(1)).close();
             verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("5-1"));
+        }
+    }
+
+    @Test
+    public void deadLetterKeyDefaultsToQueueKeyPlusSuffix() {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        assertEquals("s:dead-letter", op.getDeadLetterKeyForTest());
+    }
+
+    @Test
+    public void reclaimSweepRedeliversMessageUnderMaxAttempts() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("4-1", 2L);
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("4-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(pending));
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("4-1"))).thenReturn(claimed);
+        })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "4-1");
+            verify(mocked.constructed().get(0), never()).xadd(eq("s:dead-letter"), anyString());
+            verify(listener, atLeastOnce()).submit(any(com.boomi.connector.api.Payload.class));
+        }
+    }
+
+    @Test
+    public void reclaimSweepDeadLettersMessageOverMaxAttempts() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("5-1", 4L);
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("5-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(pending));
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("5-1"))).thenReturn(claimed);
+        })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(mocked.constructed().get(0), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
+            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "5-1");
+            verify(listener, never()).submit(any(com.boomi.connector.api.Payload.class));
         }
     }
 }

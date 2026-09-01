@@ -47,11 +47,15 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private final String consumerName;
     private final boolean ackOnCompletion;
     private final long ackWaitTimeoutMs;
+    private final long idleReclaimTimeoutMs;
+    private final long maxDeliveryAttempts;
+    private final String deadLetterKey;
 
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     private volatile Thread pollThread;
     private volatile Listener listener;
     private volatile RedisConnection redisConnection;
+    private volatile long lastReclaimSweepAt = 0L;
 
     public RedisListenOperation(OperationContext context) {
         this.context = context;
@@ -76,12 +80,24 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     context.getOperationProperties().getProperty("ack_mode", "OnCompletion"));
             this.ackWaitTimeoutMs = longPropertyOrDefault(context.getOperationProperties(),
                     "idle_reclaim_timeout_ms", DEFAULT_ACK_WAIT_TIMEOUT_MS);
+            this.idleReclaimTimeoutMs = context.getOperationProperties().getLongProperty("idle_reclaim_timeout_ms", 60000L);
+            this.maxDeliveryAttempts = context.getOperationProperties().getLongProperty("max_delivery_attempts", 5L);
+            String configuredDeadLetterKey = context.getOperationProperties().getProperty("dead_letter_key", "");
+            this.deadLetterKey = (configuredDeadLetterKey == null || configuredDeadLetterKey.isEmpty())
+                    ? queueKey + ":dead-letter" : configuredDeadLetterKey;
         } else {
             this.consumerGroupName = null;
             this.consumerName = null;
             this.ackOnCompletion = false;
             this.ackWaitTimeoutMs = 0L;
+            this.idleReclaimTimeoutMs = 0L;
+            this.maxDeliveryAttempts = 0L;
+            this.deadLetterKey = null;
         }
+    }
+
+    String getDeadLetterKeyForTest() {
+        return deadLetterKey;
     }
 
     /**
@@ -194,6 +210,40 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);
         for (RedisStreamMessage message : messages) {
             submitStreamMessage(message);
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastReclaimSweepAt >= idleReclaimTimeoutMs) {
+            runReclaimSweep();
+            lastReclaimSweepAt = now;
+        }
+    }
+
+    /**
+     * Periodic idle-pending sweep for Stream mode, run synchronously as part of the poll thread's
+     * loop (no new thread introduced -- just another step {@link #pollStream()} takes, gated by
+     * elapsed time since the last sweep vs. {@code idle_reclaim_timeout_ms}). Messages claimed via
+     * XCLAIM that are still under {@code max_delivery_attempts} are resubmitted through the
+     * existing {@link #submitStreamMessage(RedisStreamMessage)} so ack-mode logic is not
+     * duplicated; messages over the limit are moved to the configured dead-letter stream and
+     * ack'd off the original pending list so they are not reclaimed again.
+     */
+    private void runReclaimSweep() {
+        List<com.boomi.connector.redis.connection.RedisStreamPendingMessage> pending =
+                redisConnection.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
+        for (com.boomi.connector.redis.connection.RedisStreamPendingMessage p : pending) {
+            RedisStreamMessage claimed = redisConnection.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
+            if (claimed == null) {
+                continue;
+            }
+            if (p.getDeliveryCount() > maxDeliveryAttempts) {
+                redisConnection.xadd(deadLetterKey, claimed.getValue());
+                redisConnection.xack(queueKey, consumerGroupName, claimed.getId());
+                logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
+                        + " after " + p.getDeliveryCount() + " delivery attempts.");
+            } else {
+                submitStreamMessage(claimed);
+            }
         }
     }
 
