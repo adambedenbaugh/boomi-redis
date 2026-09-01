@@ -60,4 +60,41 @@ public interface RedisConnectionInterface {
      * This method should be called when the client is no longer needed.
      */
     void close();
+
+    /** Pushes a value onto the tail of a Redis List (producer side of the List queue pattern). */
+    void rpush(String key, String value);
+
+    /** Pops from the head of a Redis List, blocking up to {@code timeoutSeconds}. Null on timeout. */
+    String blpop(String key, int timeoutSeconds);
+
+    /**
+     * Idempotently creates a Stream consumer group starting from the beginning of the stream (ID
+     * "0"), creating the stream itself if it does not exist. A no-op if the group already exists.
+     */
+    void xgroupCreate(String key, String groupName);
+
+    /** Appends a value to a Stream (producer side of the Stream queue pattern), auto-generated ID. */
+    void xadd(String key, String value);
+
+    /**
+     * Reads up to {@code count} never-before-delivered entries for this consumer group, blocking
+     * up to {@code blockMillis}. Returns an empty list on timeout.
+     */
+    java.util.List<RedisStreamMessage> xreadGroup(String key, String groupName, String consumerName, int count,
+            int blockMillis);
+
+    /** Acknowledges one Stream entry, removing it from the consumer group's pending entries list. */
+    void xack(String key, String groupName, String messageId);
+
+    /**
+     * Lists pending (unacknowledged) entries idle at least {@code idleMillis}, with their delivery
+     * counts, up to {@code count} entries.
+     */
+    java.util.List<RedisStreamPendingMessage> xpendingIdle(String key, String groupName, long idleMillis, int count);
+
+    /**
+     * Claims ownership of one pending entry for {@code consumerName}, returning its id and value,
+     * or null if it is no longer pending (already acknowledged or claimed by another consumer).
+     */
+    RedisStreamMessage xclaim(String key, String groupName, String consumerName, String messageId);
 }

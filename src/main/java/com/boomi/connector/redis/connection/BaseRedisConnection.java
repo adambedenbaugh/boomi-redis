@@ -5,8 +5,12 @@ import com.boomi.connector.redis.authentication.BoomiRedisCredentialsProvider;
 import com.boomi.connector.redis.util.RedisUtils;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.*;
+import redis.clients.jedis.resps.StreamEntry;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 /**
@@ -129,5 +133,25 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
     @Override
     public boolean isValid() {
         return true;
+    }
+
+    /**
+     * Flattens the raw {@code XREADGROUP}/multi-stream result shape (shared identically by
+     * {@code Jedis} and {@code JedisCluster}, both via {@code UnifiedJedis}) into this connector's
+     * plain {@link RedisStreamMessage} DTO. A null result (block timeout, no new entries) yields an
+     * empty list.
+     */
+    protected static List<RedisStreamMessage> toStreamMessages(
+            List<Map.Entry<String, List<StreamEntry>>> raw) {
+        List<RedisStreamMessage> messages = new ArrayList<>();
+        if (raw == null) {
+            return messages;
+        }
+        for (Map.Entry<String, List<StreamEntry>> streamEntries : raw) {
+            for (StreamEntry entry : streamEntries.getValue()) {
+                messages.add(new RedisStreamMessage(entry.getID().toString(), entry.getFields().get("value")));
+            }
+        }
+        return messages;
     }
 }

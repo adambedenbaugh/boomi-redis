@@ -7,6 +7,7 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.Response;
+import redis.clients.jedis.StreamEntryID;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.resps.ScanResult;
 
@@ -173,6 +174,105 @@ public class StandalonePooledRedisConnection extends BaseRedisConnection {
             RedisClientPoolManager.release(settings, jedisPool);
             jedisPool = null;
             settings = null;
+        }
+    }
+
+    @Override
+    public void rpush(String key, String value) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.rpush(key, value);
+        } catch (Exception e) {
+            logger.warning("Error pushing to list " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public String blpop(String key, int timeoutSeconds) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            List<String> result = jedis.blpop(timeoutSeconds, key);
+            return result == null ? null : result.get(1);
+        } catch (Exception e) {
+            logger.warning("Error popping from list " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public void xgroupCreate(String key, String groupName) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.xgroupCreate(key, groupName, new StreamEntryID(0), true);
+        } catch (redis.clients.jedis.exceptions.JedisDataException e) {
+            if (e.getMessage() == null || !e.getMessage().contains("BUSYGROUP")) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    public void xadd(String key, String value) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.xadd(key, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", value));
+        } catch (Exception e) {
+            logger.warning("Error adding to stream " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public List<RedisStreamMessage> xreadGroup(String key, String groupName, String consumerName, int count,
+            int blockMillis) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            redis.clients.jedis.params.XReadGroupParams params =
+                    new redis.clients.jedis.params.XReadGroupParams().count(count).block(blockMillis);
+            Map<String, StreamEntryID> streams = Collections.singletonMap(key, StreamEntryID.UNRECEIVED_ENTRY);
+            return toStreamMessages(jedis.xreadGroup(groupName, consumerName, params, streams));
+        } catch (Exception e) {
+            logger.warning("Error reading group " + groupName + " on stream " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public void xack(String key, String groupName, String messageId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.xack(key, groupName, new StreamEntryID(messageId));
+        } catch (Exception e) {
+            logger.warning("Error acknowledging " + messageId + " on stream " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public List<RedisStreamPendingMessage> xpendingIdle(String key, String groupName, long idleMillis, int count) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            redis.clients.jedis.params.XPendingParams params =
+                    redis.clients.jedis.params.XPendingParams.xPendingParams().idle(idleMillis).count(count);
+            List<RedisStreamPendingMessage> result = new ArrayList<>();
+            for (redis.clients.jedis.resps.StreamPendingEntry entry : jedis.xpending(key, groupName, params)) {
+                result.add(new RedisStreamPendingMessage(entry.getID().toString(), entry.getDeliveredTimes()));
+            }
+            return result;
+        } catch (Exception e) {
+            logger.warning("Error listing pending entries for " + groupName + " on stream " + key + ": "
+                    + e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public RedisStreamMessage xclaim(String key, String groupName, String consumerName, String messageId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            List<redis.clients.jedis.resps.StreamEntry> claimed = jedis.xclaim(key, groupName, consumerName, 0L,
+                    redis.clients.jedis.params.XClaimParams.xClaimParams(), new StreamEntryID(messageId));
+            if (claimed.isEmpty() || claimed.get(0) == null) {
+                return null;
+            }
+            redis.clients.jedis.resps.StreamEntry entry = claimed.get(0);
+            return new RedisStreamMessage(entry.getID().toString(), entry.getFields().get("value"));
+        } catch (Exception e) {
+            logger.warning("Error claiming " + messageId + " on stream " + key + ": " + e.getMessage());
+            throw e;
         }
     }
 }

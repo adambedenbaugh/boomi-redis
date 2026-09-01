@@ -4,8 +4,15 @@ import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.Response;
+import redis.clients.jedis.StreamEntryID;
+import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.ScanParams;
+import redis.clients.jedis.params.XClaimParams;
+import redis.clients.jedis.params.XPendingParams;
+import redis.clients.jedis.params.XReadGroupParams;
 import redis.clients.jedis.resps.ScanResult;
+import redis.clients.jedis.resps.StreamEntry;
+import redis.clients.jedis.resps.StreamPendingEntry;
 
 import java.util.*;
 import java.util.logging.Logger;
@@ -139,5 +146,66 @@ public class StandaloneRedisConnection extends BaseRedisConnection {
             }
         }
         jedis = null;
+    }
+
+    @Override
+    public void rpush(String key, String value) {
+        jedis.rpush(key, value);
+    }
+
+    @Override
+    public String blpop(String key, int timeoutSeconds) {
+        List<String> result = jedis.blpop(timeoutSeconds, key);
+        return result == null ? null : result.get(1);
+    }
+
+    @Override
+    public void xgroupCreate(String key, String groupName) {
+        try {
+            jedis.xgroupCreate(key, groupName, new StreamEntryID(0), true);
+        } catch (JedisDataException e) {
+            if (e.getMessage() == null || !e.getMessage().contains("BUSYGROUP")) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    public void xadd(String key, String value) {
+        jedis.xadd(key, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", value));
+    }
+
+    @Override
+    public List<RedisStreamMessage> xreadGroup(String key, String groupName, String consumerName, int count,
+            int blockMillis) {
+        XReadGroupParams params = new XReadGroupParams().count(count).block(blockMillis);
+        Map<String, StreamEntryID> streams = Collections.singletonMap(key, StreamEntryID.UNRECEIVED_ENTRY);
+        return toStreamMessages(jedis.xreadGroup(groupName, consumerName, params, streams));
+    }
+
+    @Override
+    public void xack(String key, String groupName, String messageId) {
+        jedis.xack(key, groupName, new StreamEntryID(messageId));
+    }
+
+    @Override
+    public List<RedisStreamPendingMessage> xpendingIdle(String key, String groupName, long idleMillis, int count) {
+        XPendingParams params = XPendingParams.xPendingParams().idle(idleMillis).count(count);
+        List<RedisStreamPendingMessage> result = new ArrayList<>();
+        for (StreamPendingEntry entry : jedis.xpending(key, groupName, params)) {
+            result.add(new RedisStreamPendingMessage(entry.getID().toString(), entry.getDeliveredTimes()));
+        }
+        return result;
+    }
+
+    @Override
+    public RedisStreamMessage xclaim(String key, String groupName, String consumerName, String messageId) {
+        List<StreamEntry> claimed = jedis.xclaim(key, groupName, consumerName, 0L, XClaimParams.xClaimParams(),
+                new StreamEntryID(messageId));
+        if (claimed.isEmpty() || claimed.get(0) == null) {
+            return null;
+        }
+        StreamEntry entry = claimed.get(0);
+        return new RedisStreamMessage(entry.getID().toString(), entry.getFields().get("value"));
     }
 }

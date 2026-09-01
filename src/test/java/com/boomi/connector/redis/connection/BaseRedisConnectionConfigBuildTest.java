@@ -24,6 +24,18 @@ public class BaseRedisConnectionConfigBuildTest {
         public void delAll(String p) { }
         public java.util.Map<String,String> getAll(String p) { return null; }
         public void close() { }
+        public void rpush(String k, String v) { }
+        public String blpop(String k, int timeoutSeconds) { return null; }
+        public void xgroupCreate(String k, String groupName) { }
+        public void xadd(String k, String v) { }
+        public java.util.List<RedisStreamMessage> xreadGroup(String k, String groupName, String consumerName,
+                int count, int blockMillis) { return null; }
+        public void xack(String k, String groupName, String messageId) { }
+        public java.util.List<RedisStreamPendingMessage> xpendingIdle(String k, String groupName, long idleMillis,
+                int count) { return null; }
+        public RedisStreamMessage xclaim(String k, String groupName, String consumerName, String messageId) {
+            return null;
+        }
     }
 
     private static RedisConnectionConfig config(String authType) {
