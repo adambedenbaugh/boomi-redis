@@ -131,6 +131,33 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void connectionFailureReportsOfflineThenOnlineOnRecovery() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) ->
+                when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new RuntimeException("connection reset"))
+                        .thenReturn(null))) {
+            op.start(listener, new RedisListenManager());
+            // backoff() sleeps a real, uninterruptible-by-design 5000ms after a failed poll before
+            // the loop retries. stop() sets `stopping` before calling interrupt(), so if stop() is
+            // invoked while that sleep is still in flight, the interrupted backoff() returns
+            // straight into a loop-top check that immediately exits (stopping is already true) --
+            // the recovery (second, successful) poll, and thus the ONLINE update, would never run.
+            // Wait out the backoff naturally (with margin) so the successful retry genuinely
+            // happens before stop() is called -- matching this class's established pattern of real
+            // sleeps proving real timing rather than mocked/instant ones.
+            Thread.sleep(5500);
+            op.stop();
+
+            verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE), anyString());
+            verify(listener, atLeastOnce()).updateStatus(ListenerStatus.ONLINE);
+        }
+    }
+
+    @Test
     public void listModePollSubmitsPoppedValueAsPayload() throws Exception {
         RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
         Listener listener = mock(Listener.class);

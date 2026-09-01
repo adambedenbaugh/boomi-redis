@@ -180,11 +180,18 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     private void runPollLoop() {
+        boolean wasOffline = false;
         while (!stopping.get() && !listener.isStopping()) {
             try {
                 pollOnce();
+                if (wasOffline) {
+                    listener.updateStatus(com.boomi.connector.api.listen.ListenerStatus.ONLINE);
+                    wasOffline = false;
+                }
             } catch (Exception e) {
                 logger.log(Level.SEVERE, "Error while polling Redis queue " + queueKey, e);
+                listener.updateStatus(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, e.getMessage());
+                wasOffline = true;
                 backoff();
             }
         }
