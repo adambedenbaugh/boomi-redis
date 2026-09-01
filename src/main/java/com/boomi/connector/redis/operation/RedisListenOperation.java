@@ -26,9 +26,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private final int pollBlockSeconds;
 
     private final AtomicBoolean stopping = new AtomicBoolean(false);
-    private Thread pollThread;
-    private Listener listener;
-    private RedisConnection redisConnection;
+    private volatile Thread pollThread;
+    private volatile Listener listener;
+    private volatile RedisConnection redisConnection;
 
     public RedisListenOperation(OperationContext context) {
         this.context = context;
@@ -63,9 +63,18 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     public void stop() {
         stopping.set(true);
         if (pollThread != null) {
+            // interrupt() is harmless and helps when the poll thread happens to be sleeping in
+            // backoff() rather than blocked inside a Redis call, but it has no effect on a
+            // blocking Jedis socket read (blpop() reads from a plain java.net.Socket, not an
+            // interruptible NIO channel). The join timeout below is what actually guarantees
+            // correctness: it must always outlast the poll thread's current in-flight blocking
+            // call (bounded by pollBlockSeconds) so join() returns because the thread genuinely
+            // terminated -- not because it timed out while still reading from the connection we
+            // are about to close.
             pollThread.interrupt();
+            long joinTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
             try {
-                pollThread.join(10_000L);
+                pollThread.join(joinTimeoutMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
