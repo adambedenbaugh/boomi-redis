@@ -6,6 +6,7 @@ import com.boomi.connector.api.Operation;
 import com.boomi.connector.api.OperationContext;
 import com.boomi.connector.redis.operation.RedisDeleteOperation;
 import com.boomi.connector.redis.operation.RedisGetOperation;
+import com.boomi.connector.redis.operation.RedisSendOperation;
 import com.boomi.connector.redis.operation.RedisUpsertOperation;
 import com.boomi.connector.util.BaseConnector;
 
@@ -35,7 +36,12 @@ public class RedisConnector extends BaseConnector {
     protected Operation createDeleteOperation(OperationContext context) {
         return new RedisDeleteOperation(context);
     }
-   
+
+    @Override
+    protected Operation createExecuteOperation(OperationContext context) {
+        return new RedisSendOperation(context);
+    }
+
     private RedisConnection createConnection(BrowseContext context) {
         return new RedisConnection(context);
     }
