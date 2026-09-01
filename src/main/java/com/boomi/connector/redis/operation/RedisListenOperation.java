@@ -227,18 +227,59 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * existing {@link #submitStreamMessage(RedisStreamMessage)} so ack-mode logic is not
      * duplicated; messages over the limit are moved to the configured dead-letter stream and
      * ack'd off the original pending list so they are not reclaimed again.
+     *
+     * <p><b>Bounding the sweep against {@code stop()}:</b> a sweep can process up to 100 pending
+     * entries in one call, each potentially doing a real {@code xclaim} round-trip and, in
+     * ack-on-completion mode (via {@link #submitStreamMessage(RedisStreamMessage)}), a nested
+     * bounded {@code future.get()} wait. {@link #computeJoinTimeoutMs()} only budgets for ONE
+     * {@code ackWaitTimeoutMs}-length wait, not a whole sweep's worth -- so once {@code stopping}
+     * is signaled, the loop below checks it at the top of every iteration and bails before
+     * starting a new entry. That bounds the sweep's remaining blocking time to at most one more
+     * in-flight {@code xclaim}/{@code future.get()}, which the existing join budget already
+     * covers. Every {@code redisConnection} access below is additionally taken through a local
+     * snapshot with a null-guard, matching the pattern in {@link #submitStreamMessage}, since
+     * {@code stop()} can still race ahead and tear down the connection while this method is
+     * mid-iteration.
      */
     private void runReclaimSweep() {
+        RedisConnection connection = redisConnection;
+        if (connection == null) {
+            logger.warning("Skipping reclaim sweep for " + queueKey + ": the Redis connection was "
+                    + "already closed by stop().");
+            return;
+        }
         List<com.boomi.connector.redis.connection.RedisStreamPendingMessage> pending =
-                redisConnection.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
+                connection.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
         for (com.boomi.connector.redis.connection.RedisStreamPendingMessage p : pending) {
-            RedisStreamMessage claimed = redisConnection.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
+            if (stopping.get()) {
+                logger.info("Reclaim sweep for " + queueKey + " stopping early: shutdown was "
+                        + "signaled mid-sweep; remaining pending entries will be picked up on a "
+                        + "future sweep.");
+                break;
+            }
+
+            connection = redisConnection;
+            if (connection == null) {
+                logger.warning("Aborting reclaim sweep for " + queueKey + ": the Redis connection "
+                        + "was closed by stop() mid-sweep.");
+                break;
+            }
+
+            RedisStreamMessage claimed = connection.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
             if (claimed == null) {
                 continue;
             }
+
             if (p.getDeliveryCount() > maxDeliveryAttempts) {
-                redisConnection.xadd(deadLetterKey, claimed.getValue());
-                redisConnection.xack(queueKey, consumerGroupName, claimed.getId());
+                connection = redisConnection;
+                if (connection == null) {
+                    logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from "
+                            + queueKey + ": the Redis connection was closed by stop() mid-sweep. "
+                            + "The message remains pending and is eligible for a future reclaim.");
+                    break;
+                }
+                connection.xadd(deadLetterKey, claimed.getValue());
+                connection.xack(queueKey, consumerGroupName, claimed.getId());
                 logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
                         + " after " + p.getDeliveryCount() + " delivery attempts.");
             } else {
@@ -311,7 +352,20 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             }
         } else {
             listener.submit(PayloadUtil.toPayload(json));
-            redisConnection.xack(queueKey, consumerGroupName, message.getId());
+            // stop() may have raced ahead and torn down redisConnection while listener.submit()
+            // was in flight -- this ack-on-submission branch has no bounded wait like the
+            // ack-on-completion branch above, but listener.submit() is not guaranteed to return
+            // instantaneously. Read the volatile field once into a local so the null-check and the
+            // use below observe the same value, matching the guard above.
+            RedisConnection connection = redisConnection;
+            if (connection != null) {
+                connection.xack(queueKey, consumerGroupName, message.getId());
+            } else {
+                logger.warning("Cannot acknowledge stream message " + message.getId() + " on "
+                        + queueKey + ": the Redis connection was already closed by stop() while "
+                        + "listener.submit() was in flight. The message remains unacknowledged "
+                        + "and is eligible for reclaim.");
+            }
         }
     }
 

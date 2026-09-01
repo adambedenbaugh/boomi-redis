@@ -464,4 +464,79 @@ public class RedisListenOperationTest {
             verify(listener, never()).submit(any(com.boomi.connector.api.Payload.class));
         }
     }
+
+    @Test(timeout = 15000)
+    public void reclaimSweepStopsProcessingRemainingEntriesOnceStoppingIsSignaled() throws Exception {
+        // Regression test for the Critical review finding: runReclaimSweep()'s for-loop had no
+        // stopping/interrupted check between iterations, so if stop() raced ahead while a sweep
+        // was still working through multiple pending entries, redisConnection could be torn down
+        // out from under the loop with no null guard at any of its four call sites. The fix adds
+        // a stopping.get() check at the top of each iteration; this test proves that check
+        // actually short-circuits the remaining entries once stop() is invoked mid-sweep, and
+        // that no exception escapes. It intentionally does NOT test wall-clock join-timeout math
+        // (that is already covered by the two prior timeout regression tests in this class) --
+        // this fix's mechanism depends on the stopping flag being observed between iterations,
+        // not on timeout arithmetic.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending1 =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("10-1", 1L);
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending2 =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("10-2", 1L);
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending3 =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("10-3", 1L);
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed1 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("10-1", "v1");
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed2 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("10-2", "v2");
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed3 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("10-3", "v3");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Arrays.asList(pending1, pending2, pending3));
+            // Processing the first pending entry takes real (short) time -- long enough for a
+            // concurrently-invoked stop() to set `stopping` before this sweep's loop reaches
+            // entry 2/3. Ignores interrupts, matching the "uninterruptible blocking call" pattern
+            // used elsewhere in this class -- stop()'s (harmless) interrupt() call must not
+            // shorten this wait.
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-1"))).thenAnswer(invocation -> {
+                long deadline = System.currentTimeMillis() + 300L;
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        Thread.sleep(deadline - System.currentTimeMillis());
+                    } catch (InterruptedException ignored) {
+                        // swallow, matching an uninterruptible blocking call
+                    }
+                }
+                return claimed1;
+            });
+            // Stubbed so that if the fix regresses and the loop keeps going past stop(), these
+            // calls would succeed and the "never()" assertions below would fail loudly, rather
+            // than silently passing because xclaim happened to return null for an unstubbed call.
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-2"))).thenReturn(claimed2);
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-3"))).thenReturn(claimed3);
+        })) {
+            op.start(listener, new RedisListenManager());
+            // Let the poll thread begin the sweep and enter the ~300ms xclaim("10-1") call before
+            // invoking stop() concurrently from this (the test) thread.
+            Thread.sleep(100L);
+
+            op.stop();
+
+            RedisConnection connection = mocked.constructed().get(0);
+            verify(connection, times(1)).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-1"));
+            verify(connection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-2"));
+            verify(connection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-3"));
+            verify(listener, times(1)).submit(any(com.boomi.connector.api.Payload.class));
+            verify(connection, times(1)).xack(eq("s"), eq("mygroup"), eq("10-1"));
+            verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-2"));
+            verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-3"));
+            verify(connection, times(1)).close();
+        }
+    }
 }
