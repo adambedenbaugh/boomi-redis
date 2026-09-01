@@ -5,11 +5,18 @@ import com.boomi.connector.api.OperationContext;
 import com.boomi.connector.api.Payload;
 import com.boomi.connector.api.PropertyMap;
 import com.boomi.connector.api.listen.Listener;
+import com.boomi.connector.api.listen.ListenerExecutionResult;
 import com.boomi.connector.api.listen.ListenerStatus;
+import com.boomi.connector.api.listen.SubmitOptions;
 import com.boomi.connector.redis.RedisConnection;
 import com.boomi.connector.redis.pool.RedisListenManager;
 import org.junit.Test;
 import org.mockito.MockedConstruction;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -139,6 +146,166 @@ public class RedisListenOperationTest {
             op.stop();
 
             verify(listener, atLeastOnce()).submit(argThat((Payload payload) -> true));
+        }
+    }
+
+    private OperationContext streamContext(String ackMode) {
+        return streamContext(ackMode, 1000L);
+    }
+
+    private OperationContext streamContext(String ackMode, long idleReclaimTimeoutMs) {
+        PropertyMap connProps = mock(PropertyMap.class);
+        when(connProps.getProperty("consumerGroupName")).thenReturn("mygroup");
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
+        when(opProps.getProperty("queue_key", "")).thenReturn("s");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getProperty("ack_mode", "OnCompletion")).thenReturn(ackMode);
+        // RedisListenOperation.longPropertyOrDefault() always calls getLongProperty(key, DEFAULT) --
+        // stub it explicitly (a bare mock does not apply the real fallback behavior to unstubbed
+        // calls) so ack-on-completion's future.get(timeout, unit) bound is deterministic in tests.
+        when(opProps.getLongProperty(eq("idle_reclaim_timeout_ms"), any())).thenReturn(idleReclaimTimeoutMs);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+        when(ctx.getConnectionProperties()).thenReturn(connProps);
+        return ctx;
+    }
+
+    @Test(expected = ConnectorException.class)
+    public void streamModeWithoutConsumerGroupThrowsAtConstruction() {
+        PropertyMap connProps = mock(PropertyMap.class);
+        when(connProps.getProperty("consumerGroupName")).thenReturn("");
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
+        when(opProps.getProperty("queue_key", "")).thenReturn("s");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+        when(ctx.getConnectionProperties()).thenReturn(connProps);
+
+        new RedisListenOperation(ctx);
+    }
+
+    @Test
+    public void streamModeCreatesConsumerGroupOnStart() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            op.stop();
+            verify(mocked.constructed().get(0)).xgroupCreate(eq("s"), eq("mygroup"));
+        }
+    }
+
+    @Test
+    public void ackOnSubmissionAcksImmediatelyAfterSubmit() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(listener, atLeastOnce()).submit(any(com.boomi.connector.api.Payload.class));
+            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "1-1");
+        }
+    }
+
+    @Test
+    public void ackOnCompletionAcksOnlyAfterSuccessfulFuture() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        ListenerExecutionResult success = mock(ListenerExecutionResult.class);
+        when(success.isSuccess()).thenReturn(true);
+        when(listener.submit(any(com.boomi.connector.api.Payload.class), any(SubmitOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(success));
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("2-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "2-1");
+        }
+    }
+
+    @Test
+    public void ackOnCompletionDoesNotAckOnFailure() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        ListenerExecutionResult failure = mock(ListenerExecutionResult.class);
+        when(failure.isSuccess()).thenReturn(false);
+        when(listener.submit(any(com.boomi.connector.api.Payload.class), any(SubmitOptions.class)))
+                .thenReturn(CompletableFuture.completedFuture(failure));
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("3-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("3-1"));
+        }
+    }
+
+    @Test
+    public void ackOnCompletionTimesOutAndDoesNotAckWhenFutureNeverCompletes() throws Exception {
+        // Proves the future.get() bound documented on submitStreamMessage(): a process execution
+        // that never completes must not hang the poll thread indefinitely -- it must give up after
+        // the configured "Idle Reclaim Timeout" and leave the message unacknowledged for reclaim,
+        // rather than blocking forever on an unbounded future.get().
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 50L));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        @SuppressWarnings("unchecked")
+        Future<ListenerExecutionResult> neverCompletingFuture = mock(Future.class);
+        when(neverCompletingFuture.get(anyLong(), any(TimeUnit.class))).thenThrow(new TimeoutException());
+        when(listener.submit(any(com.boomi.connector.api.Payload.class), any(SubmitOptions.class)))
+                .thenReturn(neverCompletingFuture);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("4-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            long startedAt = System.currentTimeMillis();
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            assertTrue("stop() must return promptly once the bounded future.get() gives up",
+                    System.currentTimeMillis() - startedAt < 5000);
+            verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("4-1"));
         }
     }
 }
