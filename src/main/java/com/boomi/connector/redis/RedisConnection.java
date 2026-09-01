@@ -8,7 +8,11 @@ import com.boomi.connector.api.BrowseContext;
 import com.boomi.connector.api.ConnectorException;
 import com.boomi.connector.redis.connection.RedisConnectionInterface;
 import com.boomi.connector.redis.connection.RedisConnectionFactory;
+import com.boomi.connector.redis.connection.RedisStreamMessage;
+import com.boomi.connector.redis.connection.RedisStreamPendingMessage;
 import com.boomi.connector.util.BaseConnection;
+
+import java.util.List;
 
 public class RedisConnection extends BaseConnection<BrowseContext> {
 
@@ -62,6 +66,47 @@ public class RedisConnection extends BaseConnection<BrowseContext> {
     public void delAll(String pattern) {
         init();
         redisClient.delAll(pattern);
+    }
+
+    public void rpush(String key, String value) {
+        init();
+        redisClient.rpush(key, value);
+    }
+
+    public String blpop(String key, int timeoutSeconds) {
+        init();
+        return redisClient.blpop(key, timeoutSeconds);
+    }
+
+    public void xgroupCreate(String key, String groupName) {
+        init();
+        redisClient.xgroupCreate(key, groupName);
+    }
+
+    public void xadd(String key, String value) {
+        init();
+        redisClient.xadd(key, value);
+    }
+
+    public List<RedisStreamMessage> xreadGroup(String key, String groupName, String consumerName, int count,
+            int blockMillis) {
+        init();
+        return redisClient.xreadGroup(key, groupName, consumerName, count, blockMillis);
+    }
+
+    public void xack(String key, String groupName, String messageId) {
+        init();
+        redisClient.xack(key, groupName, messageId);
+    }
+
+    public List<RedisStreamPendingMessage> xpendingIdle(String key, String groupName, long idleMillis, int count) {
+        init();
+        return redisClient.xpendingIdle(key, groupName, idleMillis, count);
+    }
+
+    public RedisStreamMessage xclaim(String key, String groupName, String consumerName, String messageId) {
+        init();
+        return redisClient.xclaim(key, groupName, consumerName, messageId);
     }
 
     /**
