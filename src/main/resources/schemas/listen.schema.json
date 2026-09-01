@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Redis Listen Message",
+  "description": "Key-value pair emitted for one List or Stream message",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "The List/Stream key, or the Stream entry id when Queue Type is Stream"
+    },
+    "value": {
+      "type": "string",
+      "description": "The message value"
+    }
+  },
+  "required": ["key", "value"],
+  "additionalProperties": false
+}

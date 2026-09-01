@@ -140,6 +140,12 @@
             </valueCondition>
         </visibilityCondition>
     </field>
+    <field id="consumerGroupName" label="Consumer Group Name" type="string">
+        <helpText>Redis Stream consumer group name used by Listen operations on this connection whose Queue Type is
+            "Stream". Not used for Queue Type "List" or by GET/UPSERT/DELETE. The connector creates the group
+            automatically (from the beginning of the stream) if it does not already exist.</helpText>
+        <defaultValue></defaultValue>
+    </field>
 
 	<operation types="GET" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
@@ -171,6 +177,99 @@
 		<field id="key_prefix" label="Key Prefix" type="string">
 	        <helpText>Prefix added to all key values.</helpText>
 	        <defaultValue></defaultValue>
+	    </field>
+	</operation>
+
+	<operation types="LISTEN" supportsBrowse="true">
+		<field id="queue_type" label="Queue Type" type="string" displayType="list">
+	        <helpText>List: simple, at-most-once delivery via BLPOP - a popped message is gone if the receiving
+	            process run crashes. Stream: reliable, at-least-once delivery via a Redis Stream consumer group - an
+	            unacknowledged message is automatically redelivered, and a message that keeps failing is moved to a
+	            dead-letter stream instead of retried forever. Requires "Consumer Group Name" set on the
+	            connection.</helpText>
+	        <defaultValue>List</defaultValue>
+	        <allowedValue label="List">
+	            <value>List</value>
+	        </allowedValue>
+	        <allowedValue label="Stream">
+	            <value>Stream</value>
+	        </allowedValue>
+	    </field>
+	    <field id="queue_key" label="Queue Key" type="string">
+	        <helpText>The Redis key to consume (the List or Stream name).</helpText>
+	        <defaultValue></defaultValue>
+	    </field>
+	    <field id="singleton_mode" label="Singleton Mode" type="boolean">
+	        <helpText>When enabled, only one node in a Molecule/clustered Atom runs this listener at a time. When
+	            disabled (default), every node listens independently - Redis's own atomicity ensures a given message
+	            is still delivered to only one node.</helpText>
+	        <defaultValue>false</defaultValue>
+	    </field>
+	    <field id="ack_mode" label="Ack Mode" type="string" displayType="list">
+	        <helpText>Stream Queue Type only. On process completion: acknowledges a message only after its process
+	            run finishes successfully - true at-least-once, but ties up this listener until the run completes.
+	            On submission: acknowledges as soon as Boomi accepts the message - faster, but a process failure
+	            after acceptance is not redelivered.</helpText>
+	        <defaultValue>OnCompletion</defaultValue>
+	        <allowedValue label="On process completion">
+	            <value>OnCompletion</value>
+	        </allowedValue>
+	        <allowedValue label="On submission">
+	            <value>OnSubmission</value>
+	        </allowedValue>
+	        <visibilityCondition>
+	            <valueCondition fieldId="queue_type">
+	                <value>Stream</value>
+	            </valueCondition>
+	        </visibilityCondition>
+	    </field>
+	    <field id="idle_reclaim_timeout_ms" label="Idle Reclaim Timeout (ms)" type="integer">
+	        <helpText>Stream Queue Type only. A pending message idle longer than this is reclaimed for redelivery
+	            (or dead-lettered, past Max Delivery Attempts).</helpText>
+	        <defaultValue>60000</defaultValue>
+	        <visibilityCondition>
+	            <valueCondition fieldId="queue_type">
+	                <value>Stream</value>
+	            </valueCondition>
+	        </visibilityCondition>
+	    </field>
+	    <field id="max_delivery_attempts" label="Max Delivery Attempts" type="integer">
+	        <helpText>Stream Queue Type only. Beyond this many delivery attempts, a message is moved to the
+	            dead-letter stream instead of redelivered again.</helpText>
+	        <defaultValue>5</defaultValue>
+	        <visibilityCondition>
+	            <valueCondition fieldId="queue_type">
+	                <value>Stream</value>
+	            </valueCondition>
+	        </visibilityCondition>
+	    </field>
+	    <field id="dead_letter_key" label="Dead Letter Key" type="string">
+	        <helpText>Stream Queue Type only. Redis Stream key for messages that exceeded Max Delivery Attempts.
+	            Defaults to "&lt;Queue Key&gt;:dead-letter" when left blank.</helpText>
+	        <defaultValue></defaultValue>
+	        <visibilityCondition>
+	            <valueCondition fieldId="queue_type">
+	                <value>Stream</value>
+	            </valueCondition>
+	        </visibilityCondition>
+	    </field>
+	    <field id="poll_block_ms" label="Poll Block (ms)" type="integer">
+	        <helpText>Blocking timeout per poll iteration (BLPOP timeout / XREADGROUP BLOCK).</helpText>
+	        <defaultValue>5000</defaultValue>
+	    </field>
+	</operation>
+
+	<operation types="EXECUTE" supportsBrowse="true">
+		<field id="queue_type" label="Queue Type" type="string" displayType="list">
+	        <helpText>List: pushes with RPUSH (paired with a List-mode Listen's BLPOP for FIFO order). Stream:
+	            pushes with XADD (paired with a Stream-mode Listen).</helpText>
+	        <defaultValue>List</defaultValue>
+	        <allowedValue label="List">
+	            <value>List</value>
+	        </allowedValue>
+	        <allowedValue label="Stream">
+	            <value>Stream</value>
+	        </allowedValue>
 	    </field>
 	</operation>
 

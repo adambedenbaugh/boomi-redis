@@ -40,10 +40,20 @@ public class RedisBrowser extends BaseBrowser {
 				objectType.withId("Delete")
 					.withLabel("Delete");
 				return types.withTypes(objectType);
-				
+
+			case LISTEN:
+				objectType.withId("Listen")
+					.withLabel("Listen");
+				return types.withTypes(objectType);
+
+			case EXECUTE:
+				objectType.withId("Send")
+					.withLabel("Send");
+				return types.withTypes(objectType);
+
 			default:
 				throw new UnsupportedOperationException("Unsupported operation type: "
-						+ this.getContext().getOperationType() + ". Expected GET, UPSERT, or DELETE.");
+						+ this.getContext().getOperationType() + ". Expected GET, UPSERT, DELETE, LISTEN, or EXECUTE.");
 		}
 	}
 
