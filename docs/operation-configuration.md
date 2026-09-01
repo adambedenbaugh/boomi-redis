@@ -80,3 +80,64 @@ the prefix defines the pattern of keys to delete. Default is empty.
 > **Attention:** Setting the object ID to `*` with an empty key prefix deletes every
 > key matching the prefix pattern. Confirm the prefix before running a delete-all
 > against a shared cache.
+
+## LISTEN
+
+The LISTEN operation consumes messages from a Redis List or Stream. It works as a
+listener shape in Boomi: each message is delivered to the process once it arrives
+(or is redelivered on process failure, for Stream mode).
+
+### Options tab
+
+**Queue Type** — The Redis data structure used for the queue. Default is `List`.
+- `List` — Simple, at-most-once delivery via `BLPOP`. A popped message is gone
+  from the queue even if the receiving process run crashes.
+- `Stream` — Reliable, at-least-once delivery via a Redis Stream consumer group.
+  An unacknowledged message is automatically redelivered, and a message that
+  keeps failing is moved to a dead-letter stream instead of retried forever.
+  Requires "Consumer Group Name" set on the connection.
+
+**Queue Key** — The Redis key to consume (the List or Stream name). Default is
+empty.
+
+**Singleton Mode** — When enabled, only one node in a Molecule/clustered Atom
+runs this listener at a time. When disabled (default), every node listens
+independently — Redis's own atomicity ensures a given message is still delivered
+to only one node. Default is cleared (`false`).
+
+**Ack Mode** *(Stream only)* — How a message is acknowledged after process
+completion. Default is `On process completion`.
+- `On process completion` — Acknowledges a message only after its process run
+  finishes successfully. True at-least-once delivery, but the listener is blocked
+  waiting for the process to complete.
+- `On submission` — Acknowledges as soon as Boomi accepts the message. Faster,
+  but a process failure after acceptance is not redelivered.
+
+**Idle Reclaim Timeout (ms)** *(Stream only)* — A pending message idle longer
+than this duration (in milliseconds) is reclaimed for redelivery (or dead-lettered
+if Max Delivery Attempts is exceeded). In "On Process Completion" Ack Mode, this
+value is also the maximum time the listener waits for a process execution to
+finish; if the process takes longer, it is abandoned and the message is left
+unacknowledged for reclaim. Default is `60000` (60 seconds).
+
+**Max Delivery Attempts** *(Stream only)* — Beyond this many delivery attempts, a
+message is moved to the dead-letter stream instead of redelivered again. Default
+is `5`.
+
+**Dead Letter Key** *(Stream only)* — Redis Stream key for messages that exceeded
+Max Delivery Attempts. Defaults to `<Queue Key>:dead-letter` when left blank.
+Default is empty.
+
+**Poll Block (ms)** — Blocking timeout per poll iteration (BLPOP timeout / XREADGROUP BLOCK), in milliseconds. Default is `5000` (5 seconds).
+
+## EXECUTE (Send)
+
+The EXECUTE operation (Send) produces messages to a Redis List or Stream, paired
+with a LISTEN operation (consumer) on the same queue key.
+
+### Options tab
+
+**Queue Type** — The Redis data structure used for the queue. Default is `List`.
+- `List` — Pushes with `RPUSH`. Pair with a List-mode Listen for FIFO delivery
+  order.
+- `Stream` — Pushes with `XADD`. Pair with a Stream-mode Listen.

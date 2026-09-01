@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
 
+## [Unreleased]
+
+### Added
+- A `LISTEN` operation that consumes messages from a Redis List (simple, at-most-once via `BLPOP`)
+  or a Redis Stream consumer group (reliable, at-least-once, with idle-reclaim and dead-lettering
+  after a configurable number of delivery attempts), and a matching `Send` (`EXECUTE`) producer
+  operation (`RPUSH`/`XADD`). See `docs/operation-configuration.md`.
+
 ## [1.2.0] - 2026-08-14
 
 ### Changed

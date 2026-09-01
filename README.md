@@ -12,19 +12,20 @@ This README is a quick-start overview. For the full technical documentation, see
 
 - **[Getting Started](docs/getting-started.md)** — develop, build, and test the connector from a fresh clone to uploadable artifacts.
 - **[Connection Configuration](docs/connection-configuration.md)** — every connection field, the clustering policies, and the three authentication modes.
-- **[Operation Configuration](docs/operation-configuration.md)** — the GET / UPSERT / DELETE operations, their properties, and JSON request/response profiles.
+- **[Operation Configuration](docs/operation-configuration.md)** — the GET / UPSERT / DELETE / LISTEN / EXECUTE operations, their properties, and JSON request/response profiles.
 - **[Deploying connector to the Boomi Platform](https://developer.boomi.com/docs/Connectors/DeployConnectors/Versioning_and_releasing_connector)** — Boomi's official documentation on deploying a connector to Boomi Integration.
 - **[Updating the Connector Icon](docs/updating-connector-icon.md)** — how to update the connector's icon.
 
 ## Features
 
-- **Operations**: GET, UPSERT, DELETE (single key and wildcard)
+- **Operations**: GET, UPSERT, DELETE, LISTEN, EXECUTE (single key and wildcard for GET/DELETE; LISTEN/EXECUTE support List and Stream queue types)
 - **Authentication**: None, Basic (username/password), Microsoft Entra ID (OAuth 2.0 client credentials)
 - **Deployment modes**: Standalone, connection-pooled standalone, Cluster
 - **Clustering Policy**: Single Endpoint, OSS Cluster — see [Clustering Policy](#clustering-policy)
 - **SSL/TLS**: Configurable; required for Azure Cache for Redis (port 6380)
 - **Key prefixes**: Configurable per operation; prefix can be stripped from GET responses
 - **TTL**: Configurable per UPSERT operation (in milliseconds); overridable at runtime
+- **Consumer groups**: Stream-based queues (LISTEN/EXECUTE) use Redis Stream consumer groups with at-least-once delivery, configurable dead-lettering, and idle reclaim
 - **JSON profiles**: Request/response schemas auto-generated via Browse
 
 ## Clustering Policy

@@ -73,6 +73,12 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 from the pool before failing. Applies only when pooling is enabled. Default is
 `5`.
 
+**Consumer Group Name** — Redis Stream consumer group name used by Listen
+operations on this connection whose Queue Type is "Stream". Not used for Queue
+Type "List" or by GET/UPSERT/DELETE. The connector creates the group
+automatically (from the beginning of the stream) if it does not already exist.
+Default is empty.
+
 > **Note:** The pooling fields above also apply to **OSS Cluster** connections, not
 > just **Single Endpoint**. `JedisCluster` always maintains its own internal
 > per-node connection pool regardless of **Enable Connection Pooling** — that
