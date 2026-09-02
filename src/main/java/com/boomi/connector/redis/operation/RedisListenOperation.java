@@ -9,6 +9,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -52,6 +53,18 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private final String deadLetterKey;
 
     private final AtomicBoolean stopping = new AtomicBoolean(false);
+
+    /**
+     * Incremented once per {@link #start()} call; the poll thread captures the resulting value at
+     * startup and re-checks it on every loop iteration (see {@link #runPollLoop(long)}). This makes
+     * it structurally impossible for a poll thread from a previous start()/stop() cycle to keep
+     * looping after a new start() has occurred -- regardless of {@link #computeJoinTimeoutMs()}'s
+     * timeout arithmetic. Without this, a poll thread still blocked past stop()'s join timeout
+     * would see `stopping` reset to false by a subsequent start() and resume looping, potentially
+     * running concurrently with the NEW poll thread against the NEW (non-thread-safe) Jedis
+     * connection.
+     */
+    private final AtomicLong generation = new AtomicLong();
     private volatile Thread pollThread;
     private volatile Listener listener;
     private volatile RedisConnection redisConnection;
@@ -139,8 +152,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             throw e;
         }
         this.redisConnection = connection;
+        final long myGeneration = generation.incrementAndGet();
         this.stopping.set(false);
-        this.pollThread = new Thread(this::runPollLoop, "Redis Listen: " + queueKey);
+        this.pollThread = new Thread(() -> runPollLoop(myGeneration), "Redis Listen: " + queueKey);
         this.pollThread.setDaemon(true);
         this.pollThread.start();
     }
@@ -194,9 +208,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         return redisBlockTimeoutMs;
     }
 
-    private void runPollLoop() {
+    private void runPollLoop(long myGeneration) {
         boolean wasOffline = false;
-        while (!stopping.get() && !listener.isStopping()) {
+        while (generation.get() == myGeneration && !stopping.get() && !listener.isStopping()) {
             try {
                 pollOnce();
                 if (wasOffline) {
@@ -221,14 +235,26 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     private void pollList() {
-        String value = redisConnection.blpop(queueKey, pollBlockSeconds);
+        RedisConnection connection = redisConnection;
+        if (connection == null) {
+            logger.warning("Skipping list poll for " + queueKey + ": the Redis connection was "
+                    + "already closed by stop().");
+            return;
+        }
+        String value = connection.blpop(queueKey, pollBlockSeconds);
         if (value != null) {
             listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
         }
     }
 
     private void pollStream() {
-        List<RedisStreamMessage> messages = redisConnection.xreadGroup(
+        RedisConnection connection = redisConnection;
+        if (connection == null) {
+            logger.warning("Skipping stream poll for " + queueKey + ": the Redis connection was "
+                    + "already closed by stop().");
+            return;
+        }
+        List<RedisStreamMessage> messages = connection.xreadGroup(
                 queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);
         for (RedisStreamMessage message : messages) {
             submitStreamMessage(message);

@@ -17,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -593,6 +594,127 @@ public class RedisListenOperationTest {
             verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-2"));
             verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-3"));
             verify(connection, times(1)).close();
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void staleThreadFromPriorGenerationDoesNotResumeLoopingAfterANewStart() throws Exception {
+        // Regression test for the Important review finding (the most structurally significant fix
+        // in this wave): if the FIRST poll thread is still blocked past stop()'s join timeout (a
+        // slower-than-expected Redis call), stop() proceeds anyway and closes/nulls
+        // redisConnection. A subsequent start() resets `stopping` back to false -- so, without a
+        // generation guard, once the STALE thread's blocked call finally returns, it re-checks its
+        // OLD loop condition, sees `stopping` is false again (set by the NEW start()), and resumes
+        // looping -- now against the NEW redisConnection, concurrently with the NEW poll thread,
+        // sharing a non-thread-safe Jedis instance between two threads.
+        //
+        // poll_block_ms = 2000 -> pollBlockSeconds = 2 -> computeJoinTimeoutMs()'s Redis-block
+        // component is max(10_000, 2_000 + 5_000) = 10_000ms (the 10s floor). The first connection's
+        // blpop() blocks for a REAL 10_800ms -- past the 10_000ms join budget -- so stop() (invoked
+        // ~200ms after start()) times out at ~10_200ms elapsed while that thread is still blocked,
+        // and proceeds to close() the first connection and null the field. A second start() then
+        // runs (new generation, new connection); ~600ms later the stale first thread's blpop()
+        // finally returns. With the generation guard, it must observe the generation mismatch and
+        // exit WITHOUT ever touching the second connection. Without the guard, it would resume
+        // looping and call blpop() on the second connection concurrently with the second poll
+        // thread's own calls -- the second connection's blpop() stub below tracks concurrent
+        // entries via a counter so that race is directly observable rather than inferred from call
+        // counts alone.
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(2000L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        RedisListenManager manager = new RedisListenManager();
+
+        AtomicInteger activeSecondConnectionCalls = new AtomicInteger(0);
+        AtomicInteger maxConcurrentSecondConnectionCalls = new AtomicInteger(0);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, constructionContext) -> {
+                    if (constructionContext.getCount() == 1) {
+                        // First ("stale") connection: blocks past the join timeout, ignoring
+                        // interrupts, matching this file's established "uninterruptible blocking
+                        // socket read" pattern.
+                        when(mock.blpop(eq("q"), anyInt())).thenAnswer(invocation -> {
+                            long deadline = System.currentTimeMillis() + 10_800L;
+                            while (System.currentTimeMillis() < deadline) {
+                                try {
+                                    Thread.sleep(deadline - System.currentTimeMillis());
+                                } catch (InterruptedException ignored) {
+                                    // swallow, matching an uninterruptible blocking call
+                                }
+                            }
+                            return null;
+                        });
+                    } else {
+                        // Second (current) connection: fast, repeating calls so the legitimate new
+                        // poll thread is running at essentially 100% duty cycle by the time the
+                        // stale thread's blocked call returns -- maximizing the chance a reverted
+                        // fix's concurrent call is caught overlapping this one. Must ignore
+                        // interrupts too, like the first connection's stub above: stop()'s
+                        // (harmless) interrupt() call targets whichever thread is CURRENT at the
+                        // time -- the second poll thread here -- and a real Jedis blpop() would
+                        // not respond to it either (see stop()'s own comment on this). Propagating
+                        // InterruptedException instead would make the poll thread take the
+                        // exception-handling branch in runPollLoop() and its 5s backoff(), which
+                        // would make this test's timing assertions flaky for reasons unrelated to
+                        // the generation-counter fix under test.
+                        when(mock.blpop(eq("q"), anyInt())).thenAnswer(invocation -> {
+                            int current = activeSecondConnectionCalls.incrementAndGet();
+                            try {
+                                maxConcurrentSecondConnectionCalls.updateAndGet(
+                                        max -> Math.max(max, current));
+                                long deadline = System.currentTimeMillis() + 200L;
+                                while (System.currentTimeMillis() < deadline) {
+                                    try {
+                                        Thread.sleep(deadline - System.currentTimeMillis());
+                                    } catch (InterruptedException ignored) {
+                                        // swallow, matching an uninterruptible blocking call
+                                    }
+                                }
+                            } finally {
+                                activeSecondConnectionCalls.decrementAndGet();
+                            }
+                            return null;
+                        });
+                    }
+                })) {
+
+            op.start(listener, manager);
+            Thread.sleep(200L);
+
+            op.stop();
+            verify(mocked.constructed().get(0), times(1)).close();
+
+            // Start a second time before the first (stale) poll thread's blpop() call has returned
+            // -- it is still ~600ms away from its 10_800ms deadline at this point.
+            op.start(listener, manager);
+
+            // Wait past the point where the stale thread's blocked call returns (~10.8s from its
+            // own start, i.e. well past this point in wall-clock time) plus enough margin for the
+            // second poll thread to be in a steady polling state.
+            Thread.sleep(1_800L);
+
+            op.stop();
+
+            // The stale first-generation thread's blocked blpop() call happened exactly once (the
+            // initial call captured above); it must never call blpop() again afterward, on either
+            // connection, once its generation is stale.
+            verify(mocked.constructed().get(0), times(1)).blpop(eq("q"), anyInt());
+            assertTrue("no more than one thread must ever be inside the second connection's "
+                    + "blpop() at a time -- concurrency observed: " + maxConcurrentSecondConnectionCalls.get()
+                    + " (a value of 2 means the stale first-generation thread resumed looping and "
+                    + "called blpop() on the second connection concurrently with the current poll "
+                    + "thread)",
+                    maxConcurrentSecondConnectionCalls.get() <= 1);
+            verify(mocked.constructed().get(1), times(1)).close();
         }
     }
 }
