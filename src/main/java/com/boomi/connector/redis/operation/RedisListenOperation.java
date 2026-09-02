@@ -102,8 +102,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     context.getOperationProperties().getProperty("ack_mode", "OnCompletion"));
             this.ackWaitTimeoutMs = longPropertyOrDefault(context.getOperationProperties(),
                     "idle_reclaim_timeout_ms", DEFAULT_ACK_WAIT_TIMEOUT_MS);
-            this.idleReclaimTimeoutMs = context.getOperationProperties().getLongProperty("idle_reclaim_timeout_ms", 60000L);
-            this.maxDeliveryAttempts = context.getOperationProperties().getLongProperty("max_delivery_attempts", 5L);
+            this.idleReclaimTimeoutMs = longPropertyOrDefault(context.getOperationProperties(),
+                    "idle_reclaim_timeout_ms", 60000L);
+            this.maxDeliveryAttempts = longPropertyOrDefault(context.getOperationProperties(),
+                    "max_delivery_attempts", 5L);
             String configuredDeadLetterKey = context.getOperationProperties().getProperty("dead_letter_key", "");
             this.deadLetterKey = (configuredDeadLetterKey == null || configuredDeadLetterKey.isEmpty())
                     ? queueKey + ":dead-letter" : configuredDeadLetterKey;
@@ -235,15 +237,35 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 pollOnce();
                 if (wasOffline) {
-                    listener.updateStatus(com.boomi.connector.api.listen.ListenerStatus.ONLINE);
+                    updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.ONLINE, null);
                     wasOffline = false;
                 }
             } catch (Exception e) {
                 logger.log(Level.SEVERE, "Error while polling Redis queue " + queueKey, e);
-                listener.updateStatus(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, e.getMessage());
+                updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, e.getMessage());
                 wasOffline = true;
                 backoff();
             }
+        }
+    }
+
+    /**
+     * Calls {@link Listener#updateStatus}, logging and swallowing an {@link IllegalStateException}
+     * rather than letting it kill the poll thread. The SDK documents {@code updateStatus} as
+     * throwing this if called after the operation has been stopped -- a real possibility in a
+     * shutdown race between {@code stop()} setting {@code stopping}/incrementing past this thread's
+     * generation and this thread reaching an update call. Other exception types are not swallowed.
+     */
+    private void updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus status, String message) {
+        try {
+            if (message != null) {
+                listener.updateStatus(status, message);
+            } else {
+                listener.updateStatus(status);
+            }
+        } catch (IllegalStateException e) {
+            logger.log(Level.FINE, "Ignoring updateStatus(" + status + ") after the listener was stopped for "
+                    + queueKey, e);
         }
     }
 
@@ -321,7 +343,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 connection.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
         for (com.boomi.connector.redis.connection.RedisStreamPendingMessage p : pending) {
             if (stopping.get()) {
-                logger.info("Reclaim sweep for " + queueKey + " stopping early: shutdown was "
+                logger.fine("Reclaim sweep for " + queueKey + " stopping early: shutdown was "
                         + "signaled mid-sweep; remaining pending entries will be picked up on a "
                         + "future sweep.");
                 break;
