@@ -92,10 +92,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         }
 
         if (STREAM.equals(queueType)) {
-            this.consumerGroupName = context.getConnectionProperties().getProperty("consumerGroupName");
+            this.consumerGroupName = context.getOperationProperties().getProperty("consumer_group_name", "");
             if (consumerGroupName == null || consumerGroupName.isEmpty()) {
                 throw new ConnectorException("Queue Type \"Stream\" requires a \"Consumer Group Name\" "
-                        + "set on the connection.");
+                        + "set on this operation.");
             }
             this.consumerName = deriveConsumerName();
             this.ackOnCompletion = "OnCompletion".equals(

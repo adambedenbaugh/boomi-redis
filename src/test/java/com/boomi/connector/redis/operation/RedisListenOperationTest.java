@@ -179,8 +179,8 @@ public class RedisListenOperationTest {
 
     private OperationContext streamContext(String ackMode) {
         PropertyMap connProps = mock(PropertyMap.class);
-        when(connProps.getProperty("consumerGroupName")).thenReturn("mygroup");
         PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("consumer_group_name", "")).thenReturn("mygroup");
         when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
         when(opProps.getProperty("queue_key", "")).thenReturn("s");
         when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
@@ -197,8 +197,8 @@ public class RedisListenOperationTest {
 
     private OperationContext streamContext(String ackMode, long idleReclaimTimeoutMs) {
         PropertyMap connProps = mock(PropertyMap.class);
-        when(connProps.getProperty("consumerGroupName")).thenReturn("mygroup");
         PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("consumer_group_name", "")).thenReturn("mygroup");
         when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
         when(opProps.getProperty("queue_key", "")).thenReturn("s");
         when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
@@ -217,8 +217,8 @@ public class RedisListenOperationTest {
     @Test(expected = ConnectorException.class)
     public void streamModeWithoutConsumerGroupThrowsAtConstruction() {
         PropertyMap connProps = mock(PropertyMap.class);
-        when(connProps.getProperty("consumerGroupName")).thenReturn("");
         PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("consumer_group_name", "")).thenReturn("");
         when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
         when(opProps.getProperty("queue_key", "")).thenReturn("s");
         when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);

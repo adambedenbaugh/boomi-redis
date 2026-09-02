@@ -73,12 +73,6 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 from the pool before failing. Applies only when pooling is enabled. Default is
 `5`.
 
-**Consumer Group Name** — Redis Stream consumer group name used by Listen
-operations on this connection whose Queue Type is "Stream". Not used for Queue
-Type "List" or by GET/UPSERT/DELETE. The connector creates the group
-automatically (from the beginning of the stream) if it does not already exist.
-Default is empty.
-
 > **Attention:** A pooled Listen operation holds one connection from the shared
 > pool for essentially the entire time it is running — a blocking poll
 > borrows-and-holds a connection for the configured Poll Block duration, then

@@ -106,13 +106,13 @@ public class RedisListenSendIT {
         connProps.put("poolEnabled", false);
         connProps.put("connectionTimeout", 5L);
         connProps.put("socketTimeout", 5L);
-        if (consumerGroupName != null && !consumerGroupName.isEmpty()) {
-            connProps.put("consumerGroupName", consumerGroupName);
-        }
 
         Map<String, Object> opProps = new HashMap<>();
         opProps.put("queue_type", queueType);
         opProps.put("queue_key", queueKey);
+        if (consumerGroupName != null && !consumerGroupName.isEmpty()) {
+            opProps.put("consumer_group_name", consumerGroupName);
+        }
         opProps.put("singleton_mode", false);
         opProps.put("poll_block_ms", pollBlockMs);
         if (ackMode != null) {

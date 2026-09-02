@@ -95,10 +95,22 @@ listener shape in Boomi: each message is delivered to the process once it arrive
 - `Stream` — Reliable, at-least-once delivery via a Redis Stream consumer group.
   An unacknowledged message is automatically redelivered, and a message that
   keeps failing is moved to a dead-letter stream instead of retried forever.
-  Requires "Consumer Group Name" set on the connection.
+  Requires "Consumer Group Name" set on this operation.
 
 **Queue Key** — The Redis key to consume (the List or Stream name). Default is
 empty.
+
+**Consumer Group Name** *(Stream only)* — The Redis Stream consumer group
+name. The connector creates the group automatically (from the beginning of
+the stream) if it does not already exist. Default is empty.
+
+Every node running this **same** operation should use the same Consumer Group
+Name — that is how Redis Streams scale a listener across nodes in a Molecule:
+each node gets its own unique consumer name automatically, but all nodes
+share this one group, and Redis guarantees each message still goes to only
+one node. Give two **different**, unrelated Listen operations on the same
+Queue Key different Consumer Group Names, or they will unintentionally split
+each other's messages instead of each seeing the full stream.
 
 **Singleton Mode** — When enabled, only one node in a Molecule/clustered Atom
 runs this listener at a time. When disabled (default), every node listens
@@ -155,5 +167,8 @@ SDK's `EXECUTE` operation type, displayed as "Send" in the operation picker.
 - `List` — Pushes with `RPUSH`. Pair with a List-mode Listen for FIFO delivery
   order.
 - `Stream` — Pushes with `XADD`. Pair with a Stream-mode Listen.
+
+The request document's `key` field is the List or Stream name to push/add to
+— it is set per document, not configured on this operation.
 
 **Key Prefix** — Prepended to the key before pushing/adding. Default is empty.

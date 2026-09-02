@@ -140,12 +140,6 @@
             </valueCondition>
         </visibilityCondition>
     </field>
-    <field id="consumerGroupName" label="Consumer Group Name" type="string">
-        <helpText>Redis Stream consumer group name used by Listen operations on this connection whose Queue Type is
-            "Stream". Not used for Queue Type "List" or by GET/UPSERT/DELETE. The connector creates the group
-            automatically (from the beginning of the stream) if it does not already exist.</helpText>
-        <defaultValue></defaultValue>
-    </field>
 
 	<operation types="GET" supportsBrowse="true">
 		<field id="key_prefix" label="Key Prefix" type="string">
@@ -185,8 +179,8 @@
 	        <helpText>List: simple, at-most-once delivery via BLPOP - a popped message is gone if the receiving
 	            process run crashes. Stream: reliable, at-least-once delivery via a Redis Stream consumer group - an
 	            unacknowledged message is automatically redelivered, and a message that keeps failing is moved to a
-	            dead-letter stream instead of retried forever. Requires "Consumer Group Name" set on the
-	            connection.</helpText>
+	            dead-letter stream instead of retried forever. Requires "Consumer Group Name" set on this
+	            operation.</helpText>
 	        <defaultValue>List</defaultValue>
 	        <allowedValue label="List">
 	            <value>List</value>
@@ -198,6 +192,21 @@
 	    <field id="queue_key" label="Queue Key" type="string">
 	        <helpText>The Redis key to consume (the List or Stream name).</helpText>
 	        <defaultValue></defaultValue>
+	    </field>
+	    <field id="consumer_group_name" label="Consumer Group Name" type="string">
+	        <helpText>Stream Queue Type only. The connector creates the group automatically (from the beginning of
+	            the stream) if it does not already exist. Every node running this SAME operation should use the same
+	            Consumer Group Name - that is how Redis Streams scale a listener across nodes in a Molecule: each
+	            node gets its own unique consumer name automatically, but all nodes share this one group, and Redis
+	            guarantees each message still goes to only one node. Give two DIFFERENT, unrelated Listen operations
+	            on the same Queue Key different Consumer Group Names, or they will unintentionally split each
+	            other's messages instead of each seeing the full stream.</helpText>
+	        <defaultValue></defaultValue>
+	        <visibilityCondition>
+	            <valueCondition fieldId="queue_type">
+	                <value>Stream</value>
+	            </valueCondition>
+	        </visibilityCondition>
 	    </field>
 	    <field id="singleton_mode" label="Singleton Mode" type="boolean">
 	        <helpText>When enabled, only one node in a Molecule/clustered Atom runs this listener at a time. When
@@ -270,7 +279,8 @@
 	<operation types="EXECUTE" customTypeId="send" customTypeLabel="Send" supportsBrowse="true">
 		<field id="queue_type" label="Queue Type" type="string" displayType="list">
 	        <helpText>List: pushes with RPUSH (paired with a List-mode Listen's BLPOP for FIFO order). Stream:
-	            pushes with XADD (paired with a Stream-mode Listen).</helpText>
+	            pushes with XADD (paired with a Stream-mode Listen). The request document's "key" field is the
+	            List or Stream name to push/add to - it is set per document, not configured on this operation.</helpText>
 	        <defaultValue>List</defaultValue>
 	        <allowedValue label="List">
 	            <value>List</value>
