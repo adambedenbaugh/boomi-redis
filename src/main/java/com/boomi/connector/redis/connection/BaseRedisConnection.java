@@ -22,6 +22,14 @@ import java.util.logging.Logger;
 public abstract class BaseRedisConnection implements RedisConnectionInterface {
 
     private static final Logger logger = Logger.getLogger(BaseRedisConnection.class.getName());
+
+    /**
+     * Multiplier applied to the connection's configured socket timeout to derive a bounded
+     * {@code blockingSocketTimeoutMillis} for Jedis's blocking commands (BLPOP, XREADGROUP with
+     * BLOCK). See {@link #buildClientConfig()}.
+     */
+    private static final long BLOCKING_SOCKET_TIMEOUT_MULTIPLIER = 12L;
+
     protected final RedisConnectionConfig config;
     protected final AuthenticationType authenticationType;
     protected final JedisClientFactory clientFactory;
@@ -35,11 +43,29 @@ public abstract class BaseRedisConnection implements RedisConnectionInterface {
                 authenticationType, config.getUsername(), config.getPassword(), config.getEntraOAuth2Context());
     }
 
-    /** Builds a client config; attaches the credentials provider only when auth is required. */
+    /**
+     * Builds a client config; attaches the credentials provider only when auth is required.
+     *
+     * <p>Also sets a bounded {@code blockingSocketTimeoutMillis}. Jedis 5.2's blocking commands
+     * (BLPOP, XREADGROUP with BLOCK) call {@code setTimeoutInfinite()} internally, which uses this
+     * specific config value as the actual socket timeout for the blocking call -- left unset, it
+     * defaults to 0 (infinite). Without a finite bound here, a silent network failure (a firewall
+     * drop or a cloud load-balancer idle-timeout kill -- neither sends an RST/FIN) can hang a
+     * blocking call forever regardless of the caller's own timeout argument (e.g. Redis Listen's
+     * "Poll Block" setting), which would falsify the "bounded by Poll Block" assumption the
+     * Listen operation's {@code stop()}/join-timeout design rests on. The bound is derived from
+     * this connection's own configured socket timeout (already operator-tunable -- e.g. Azure
+     * Redis guidance in this connector's docs is to raise it to 30s) with a generous multiplier so
+     * it stays comfortably larger than realistic blocking-command durations, plus the connection
+     * timeout as an extra safety margin, while never being left at the infinite default.
+     */
     protected JedisClientConfig buildClientConfig() {
+        long blockingSocketTimeoutMillis =
+                (config.getSocketTimeout() * BLOCKING_SOCKET_TIMEOUT_MULTIPLIER) + config.getConnectionTimeout();
         DefaultJedisClientConfig.Builder builder = DefaultJedisClientConfig.builder()
                 .connectionTimeoutMillis(config.getConnectionTimeout())
                 .socketTimeoutMillis(config.getSocketTimeout())
+                .blockingSocketTimeoutMillis((int) blockingSocketTimeoutMillis)
                 .ssl(config.isSSLEnabled());
         if (authenticationType != AuthenticationType.NONE) {
             builder.credentialsProvider(credentialsProvider);

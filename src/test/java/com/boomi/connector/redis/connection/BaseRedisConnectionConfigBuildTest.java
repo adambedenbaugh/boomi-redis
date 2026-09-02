@@ -69,6 +69,21 @@ public class BaseRedisConnectionConfigBuildTest {
     }
 
     @Test
+    public void blockingSocketTimeoutIsFiniteAndDerivedFromSocketTimeout() {
+        // Jedis 5.2's blocking commands (BLPOP, XREADGROUP with BLOCK) call setTimeoutInfinite()
+        // internally, which uses blockingSocketTimeoutMillis as the actual socket timeout for the
+        // blocking call -- left unset it defaults to 0 (infinite), which would let a blocking call
+        // hang forever on a silent network partition. config("None") sets socketTimeout=7s (7000ms)
+        // and connectionTimeout=5s (5000ms) -- see the config() helper above.
+        JedisClientConfig cfg = new ProbeConnection(config("None")).probe();
+        assertTrue("blockingSocketTimeoutMillis must not be left at the infinite default (0)",
+                cfg.getBlockingSocketTimeoutMillis() > 0);
+        assertEquals("blockingSocketTimeoutMillis must be derived from the configured socket/"
+                + "connection timeouts, not a hardcoded constant",
+                7000 * 12 + 5000, cfg.getBlockingSocketTimeoutMillis());
+    }
+
+    @Test
     public void basicAuthAttachesCredentialsProvider() {
         // assertNotNull alone would not detect a missing attachment, since Jedis's builder
         // always defaults getCredentialsProvider() to a non-null wrapper (see note above).
