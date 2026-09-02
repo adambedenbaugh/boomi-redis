@@ -119,11 +119,26 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     @Override
     public void start(Listener listener, RedisListenManager manager) {
         this.listener = listener;
-        this.redisConnection = new RedisConnection(context);
-        this.redisConnection.init();
-        if (STREAM.equals(queueType)) {
-            redisConnection.xgroupCreate(queueKey, consumerGroupName);
+        // Build and initialize the connection into a LOCAL variable first, not the instance field.
+        // If init() or xgroupCreate() throws (wrong Redis type at Queue Key, unreachable Redis,
+        // etc.), the exception must still propagate out of start() (the SDK contract requires
+        // start() to throw on failure) -- but the connection must never leak: on the pooled path a
+        // leaked reference permanently pins the shared pool's active-reference count so the
+        // evictor can never reclaim it, and on the unpooled path it leaks a live socket. Only
+        // assigning `this.redisConnection` after setup has fully succeeded also means a
+        // partially-failed start() leaves the instance's state clean for a subsequent start()
+        // attempt, rather than pointing at a half-initialized connection.
+        RedisConnection connection = new RedisConnection(context);
+        try {
+            connection.init();
+            if (STREAM.equals(queueType)) {
+                connection.xgroupCreate(queueKey, consumerGroupName);
+            }
+        } catch (RuntimeException e) {
+            connection.close();
+            throw e;
         }
+        this.redisConnection = connection;
         this.stopping.set(false);
         this.pollThread = new Thread(this::runPollLoop, "Redis Listen: " + queueKey);
         this.pollThread.setDaemon(true);

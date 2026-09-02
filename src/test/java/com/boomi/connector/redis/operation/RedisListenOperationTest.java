@@ -245,6 +245,35 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void startClosesConnectionAndPropagatesExceptionWhenXgroupCreateFails() throws Exception {
+        // Regression test for the Critical review finding: start() had no try/catch/finally around
+        // connection setup, so a failing xgroupCreate() (e.g. Queue Key points at the wrong Redis
+        // type, or Redis becomes unreachable between init() and xgroupCreate()) leaked the
+        // RedisConnection -- permanently pinning a pooled reference or leaking a live socket. The
+        // fix must still let the exception propagate (the SDK contract requires start() to throw on
+        // failure) but must close() the connection first.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        RuntimeException xgroupCreateFailure = new RuntimeException("WRONGTYPE Operation against a key "
+                + "holding the wrong kind of value");
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> doThrow(xgroupCreateFailure).when(mock)
+                        .xgroupCreate(anyString(), anyString()))) {
+            try {
+                op.start(listener, new RedisListenManager());
+                fail("start() must propagate the xgroupCreate() failure");
+            } catch (RuntimeException e) {
+                assertSame("start() must propagate the original exception, not wrap/swallow it",
+                        xgroupCreateFailure, e);
+            }
+
+            verify(mocked.constructed().get(0), times(1)).close();
+        }
+    }
+
+    @Test
     public void ackOnSubmissionAcksImmediatelyAfterSubmit() throws Exception {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         Listener listener = mock(Listener.class);
