@@ -202,7 +202,9 @@
 	    <field id="singleton_mode" label="Singleton Mode" type="boolean">
 	        <helpText>When enabled, only one node in a Molecule/clustered Atom runs this listener at a time. When
 	            disabled (default), every node listens independently - Redis's own atomicity ensures a given message
-	            is still delivered to only one node.</helpText>
+	            is still delivered to only one node. Enforcing single-node execution also requires the container
+	            property com.boomi.container.bounded.listen.enabled=true; without it, this setting falls back to
+	            non-singleton behavior (still safe, but not what enabling the checkbox implies).</helpText>
 	        <defaultValue>false</defaultValue>
 	    </field>
 	    <field id="ack_mode" label="Ack Mode" type="string" displayType="list">

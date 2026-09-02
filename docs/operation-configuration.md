@@ -105,6 +105,12 @@ runs this listener at a time. When disabled (default), every node listens
 independently — Redis's own atomicity ensures a given message is still delivered
 to only one node. Default is cleared (`false`).
 
+> **Note:** Enforcing single-node execution also requires the container property
+> `com.boomi.container.bounded.listen.enabled=true`. Without it, enabling this
+> checkbox falls back to non-singleton behavior — every node still listens. This
+> remains safe (Redis's own atomicity still prevents double-delivery), but is not
+> what enabling the checkbox implies.
+
 **Ack Mode** *(Stream only)* — How a message is acknowledged after process
 completion. Default is `On process completion`.
 - `On process completion` — Acknowledges a message only after its process run
@@ -129,6 +135,13 @@ Max Delivery Attempts. Defaults to `<Queue Key>:dead-letter` when left blank.
 Default is empty.
 
 **Poll Block (ms)** — Blocking timeout per poll iteration (BLPOP timeout / XREADGROUP BLOCK), in milliseconds. Default is `5000` (5 seconds).
+
+> **Attention:** On a pooled connection, a Listen operation borrows one connection
+> from the shared pool and holds it for essentially the entire time it is running
+> — a blocking poll borrows-and-holds it for the block duration, iteration after
+> iteration. Size the connection's **Maximum Connections** to accommodate the
+> number of concurrent Listen operations plus normal GET/UPSERT/DELETE/Send
+> traffic sharing that same connection.
 
 ## EXECUTE (Send)
 

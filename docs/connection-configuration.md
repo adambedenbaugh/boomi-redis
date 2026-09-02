@@ -79,6 +79,13 @@ Type "List" or by GET/UPSERT/DELETE. The connector creates the group
 automatically (from the beginning of the stream) if it does not already exist.
 Default is empty.
 
+> **Attention:** A pooled Listen operation holds one connection from the shared
+> pool for essentially the entire time it is running — a blocking poll
+> borrows-and-holds a connection for the configured Poll Block duration, then
+> immediately borrows again for the next iteration. When sizing **Maximum
+> Connections**, account for the number of concurrent Listen operations sharing
+> this connection in addition to normal GET/UPSERT/DELETE/Send traffic.
+
 > **Note:** The pooling fields above also apply to **OSS Cluster** connections, not
 > just **Single Endpoint**. `JedisCluster` always maintains its own internal
 > per-node connection pool regardless of **Enable Connection Pooling** — that
