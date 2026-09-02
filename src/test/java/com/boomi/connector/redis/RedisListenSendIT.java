@@ -225,6 +225,57 @@ public class RedisListenSendIT {
     }
 
     @Test
+    public void listenerReconnectsAfterItsConnectionIsForciblyKilled() throws Exception {
+        // Reproduces a real production incident: a listener's live connection died (broken pipe /
+        // connection reset -- here simulated by forcibly killing it server-side, same technique as
+        // RedisEntraPoolingIT.tokenRotationSelfHealsAfterConnectionKill), and before this fix the
+        // poll loop retried that same dead connection forever (~4800 identical failures logged over
+        // ~7 hours) until a human manually stopped/started the listener. This proves the listener
+        // now heals itself: it notices the break, reconnects, and still delivers a message sent
+        // afterward, with no manual intervention.
+        String queueKey = "it-selfheal-" + System.nanoTime();
+
+        OperationContext ctx = listenContext("List", queueKey, null, null, 60_000L, 5L, 1000L);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Payload payload = invocation.getArgument(0);
+            received.add(readPayload(payload));
+            return null;
+        }).when(listener).submit(any(Payload.class));
+
+        op.start(listener, new RedisListenManager());
+        try {
+            // Let the listener settle into its BLPOP loop, then sever every client connection
+            // server-side. execInContainer runs redis-cli inside the container itself, so no
+            // external redis-cli binary or auth is needed against this unauthenticated instance.
+            Thread.sleep(500);
+            org.testcontainers.containers.Container.ExecResult killResult =
+                    REDIS.execInContainer("redis-cli", "CLIENT", "KILL", "TYPE", "normal");
+            assertEquals("redis-cli CLIENT KILL failed: " + killResult.getStderr(), 0, killResult.getExitCode());
+
+            try (Jedis direct = directClient()) {
+                direct.rpush(queueKey, "hello-after-kill");
+            }
+
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (received.isEmpty() && System.currentTimeMillis() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(200);
+            }
+        } finally {
+            op.stop();
+        }
+
+        assertFalse("Expected the listener to self-heal after its connection was killed and still "
+                + "deliver a message sent afterward", received.isEmpty());
+        assertTrue("Expected the delivered payload to contain the post-kill value; got: " + received.get(0),
+                received.get(0).contains("hello-after-kill"));
+    }
+
+    @Test
     public void deadLettersAfterMaxDeliveryAttempts() throws Exception {
         String queueKey = "it-dlq-" + System.nanoTime();
         String group = "it-dlq-group-" + System.nanoTime();

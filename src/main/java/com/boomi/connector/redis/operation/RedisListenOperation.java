@@ -28,6 +28,8 @@ import com.boomi.connector.redis.pool.RedisListenManager;
 
 import com.google.gson.JsonObject;
 
+import redis.clients.jedis.exceptions.JedisConnectionException;
+
 public class RedisListenOperation implements SingletonListenOperation<RedisListenManager> {
 
     private static final Logger logger = Logger.getLogger(RedisListenOperation.class.getName());
@@ -47,6 +49,19 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * {@code idle_reclaim_timeout_ms}.
      */
     private static final long MAX_JOIN_TIMEOUT_MS = 30_000L;
+
+    /**
+     * How often a SEVERE "Error while polling" entry may repeat while an outage continues. The
+     * first failure in a run is always logged (full visibility into a new problem); Jedis never
+     * repairs a broken {@code Connection} internally, so before {@link #reconnectQuietly()} existed
+     * a dead connection meant the identical exception logged every {@link #backoff()} cycle (5s)
+     * until a human manually stopped/started the listener -- observed in production as ~4800
+     * identical stack traces over ~7 hours from a single stalled network read. Throttling repeats
+     * to at most once per this window keeps that failure mode from being able to fill the container
+     * log at scale, while {@link #shouldLogFailure} still logs a fresh entry once the outage clears
+     * and recurs.
+     */
+    static final long FAILURE_LOG_THROTTLE_MS = TimeUnit.MINUTES.toMillis(5);
 
     private final OperationContext context;
     private final String queueType;
@@ -78,6 +93,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private volatile Listener listener;
     private volatile RedisConnection redisConnection;
     private volatile long lastReclaimSweepAt = 0L;
+    private volatile int consecutiveFailures = 0;
+    private volatile long lastLoggedFailureAtMillis = 0L;
 
     public RedisListenOperation(OperationContext context) {
         this.context = context;
@@ -237,16 +254,87 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 pollOnce();
                 if (wasOffline) {
+                    logger.info("Recovered after " + consecutiveFailures + " consecutive failure(s) polling "
+                            + "Redis queue " + queueKey);
                     updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.ONLINE, null);
                     wasOffline = false;
+                    consecutiveFailures = 0;
                 }
             } catch (Exception e) {
-                logger.log(Level.SEVERE, "Error while polling Redis queue " + queueKey, e);
+                consecutiveFailures++;
+                long now = System.currentTimeMillis();
+                if (shouldLogFailure(consecutiveFailures, now, lastLoggedFailureAtMillis)) {
+                    String throttleNote = consecutiveFailures > 1
+                            ? " (" + consecutiveFailures + " consecutive failures; further identical failures "
+                                    + "are logged at most once every "
+                                    + TimeUnit.MILLISECONDS.toMinutes(FAILURE_LOG_THROTTLE_MS) + " minute(s))"
+                            : "";
+                    logger.log(Level.SEVERE, "Error while polling Redis queue " + queueKey + throttleNote, e);
+                    lastLoggedFailureAtMillis = now;
+                }
                 updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, e.getMessage());
                 wasOffline = true;
+                // Reconnect on a fresh connection-level break (still-live-but-broken Jedis, e.g.
+                // broken pipe) AND whenever the connection is currently null (a previous reconnect
+                // attempt hasn't succeeded yet) -- the latter is what makes retrying self-sustaining
+                // across repeated failures rather than only reacting once to the initial break.
+                if (e instanceof JedisConnectionException || redisConnection == null) {
+                    reconnectQuietly();
+                }
                 backoff();
             }
         }
+    }
+
+    /**
+     * Decides whether this failure occurrence should be logged at SEVERE. Package-private (static,
+     * pure) so the throttling decision is directly testable without waiting through real
+     * {@link #backoff()} cycles. Always logs the first failure in a run; while consecutive failures
+     * continue, throttles repeats to at most one per {@link #FAILURE_LOG_THROTTLE_MS}.
+     */
+    static boolean shouldLogFailure(int consecutiveFailureCount, long nowMillis, long lastLoggedAtMillis) {
+        return consecutiveFailureCount <= 1 || (nowMillis - lastLoggedAtMillis) >= FAILURE_LOG_THROTTLE_MS;
+    }
+
+    /**
+     * Replaces a broken {@link #redisConnection} after a {@link JedisConnectionException} (broken
+     * pipe, read timeout, or Jedis's own "broken connection" fail-fast). Jedis never repairs a
+     * broken {@code Connection} internally -- without this, the poll loop would retry the exact
+     * same dead socket forever, which previously required a human to manually stop/start the
+     * listener to recover (observed in production: ~7 hours of identical failures until a manual
+     * restart). Mirrors {@link #start}'s own setup: builds the replacement into a local variable
+     * first so a failed reconnect attempt (Redis still unreachable) never assigns a broken value,
+     * and re-checks {@link #stopping} before publishing the new connection so a reconnect that
+     * outlasts a concurrent {@code stop()}'s join timeout never leaks it.
+     */
+    private void reconnectQuietly() {
+        RedisConnection old = this.redisConnection;
+        this.redisConnection = null;
+        if (old != null) {
+            try {
+                old.close();
+            } catch (Exception closeError) {
+                logger.log(Level.FINE, "Error closing broken Redis connection for " + queueKey, closeError);
+            }
+        }
+
+        RedisConnection fresh = new RedisConnection(context);
+        try {
+            fresh.init();
+            if (STREAM.equals(queueType)) {
+                fresh.xgroupCreate(queueKey, consumerGroupName);
+            }
+        } catch (RuntimeException e) {
+            fresh.close();
+            logger.log(Level.FINE, "Reconnect attempt failed for " + queueKey, e);
+            return;
+        }
+
+        if (stopping.get()) {
+            fresh.close();
+            return;
+        }
+        this.redisConnection = fresh;
     }
 
     /**
@@ -280,9 +368,21 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private void pollList() {
         RedisConnection connection = redisConnection;
         if (connection == null) {
-            logger.warning("Skipping list poll for " + queueKey + ": the Redis connection was "
-                    + "already closed by stop().");
-            return;
+            if (stopping.get()) {
+                // Legitimate shutdown race: stop() already closed and nulled the connection while
+                // this call was in flight. Not an error -- return quietly, matching the file's
+                // established stop()-race guard pattern.
+                logger.warning("Skipping list poll for " + queueKey + ": the Redis connection was "
+                        + "already closed by stop().");
+                return;
+            }
+            // NOT stopping: a previous reconnect attempt after a connection failure has not yet
+            // succeeded. This must be signaled as a failure (not returned silently) so the caller's
+            // failure counting/throttled logging/backoff/retry-reconnect logic keeps engaging --
+            // silently "succeeding" here would falsely report the listener as recovered and skip
+            // backoff() entirely, spinning in a tight loop.
+            throw new ConnectorException("No Redis connection is currently available for queue " + queueKey
+                    + " after a previous connection failure. A reconnect attempt will be retried.");
         }
         String value = connection.blpop(queueKey, pollBlockSeconds);
         if (value != null) {
@@ -293,9 +393,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private void pollStream() {
         RedisConnection connection = redisConnection;
         if (connection == null) {
-            logger.warning("Skipping stream poll for " + queueKey + ": the Redis connection was "
-                    + "already closed by stop().");
-            return;
+            if (stopping.get()) {
+                logger.warning("Skipping stream poll for " + queueKey + ": the Redis connection was "
+                        + "already closed by stop().");
+                return;
+            }
+            throw new ConnectorException("No Redis connection is currently available for queue " + queueKey
+                    + " after a previous connection failure. A reconnect attempt will be retried.");
         }
         List<RedisStreamMessage> messages = connection.xreadGroup(
                 queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);

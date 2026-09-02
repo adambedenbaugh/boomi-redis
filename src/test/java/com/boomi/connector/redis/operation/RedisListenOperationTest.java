@@ -12,7 +12,14 @@ import com.boomi.connector.redis.RedisConnection;
 import com.boomi.connector.redis.pool.RedisListenManager;
 import org.junit.Test;
 import org.mockito.MockedConstruction;
+import redis.clients.jedis.exceptions.JedisConnectionException;
 
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -155,6 +162,99 @@ public class RedisListenOperationTest {
 
             verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE), anyString());
             verify(listener, atLeastOnce()).updateStatus(ListenerStatus.ONLINE);
+        }
+    }
+
+    @Test
+    public void shouldLogFailureAlwaysLogsTheFirstOccurrence() {
+        assertTrue(RedisListenOperation.shouldLogFailure(1, 1_000L, 0L));
+    }
+
+    @Test
+    public void shouldLogFailureThrottlesARepeatWithinTheWindow() {
+        long now = 1_000L;
+        long lastLoggedAt = now - (RedisListenOperation.FAILURE_LOG_THROTTLE_MS / 2);
+        assertFalse(RedisListenOperation.shouldLogFailure(2, now, lastLoggedAt));
+    }
+
+    @Test
+    public void shouldLogFailureLogsAgainOnceTheThrottleWindowElapses() {
+        long lastLoggedAt = 1_000L;
+        long now = lastLoggedAt + RedisListenOperation.FAILURE_LOG_THROTTLE_MS;
+        assertTrue(RedisListenOperation.shouldLogFailure(50, now, lastLoggedAt));
+    }
+
+    @Test
+    public void connectionExceptionClosesTheBrokenConnectionAndAttemptsToReconnect() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new JedisConnectionException("Broken pipe (Write failed)")))) {
+            op.start(listener, new RedisListenManager());
+            // Enough time for the first poll iteration to run and fail.
+            Thread.sleep(300);
+            op.stop();
+
+            // The broken connection must never be reused -- that was the root cause of the
+            // production incident this fixes: Jedis never repairs a broken Connection internally,
+            // so retrying the SAME instance forever meant the listener stayed dead until a human
+            // manually stopped/started it. reconnectQuietly()'s own replacement attempt runs on the
+            // poll thread it spawns; Mockito's construction mocking is scoped to the thread that
+            // opened it and cannot observe a construction made from a different thread, so a real
+            // (unmocked) replacement is constructed here -- proving the *attempt* happens is covered
+            // end-to-end, against real Redis, by
+            // RedisListenSendIT.listenerReconnectsAfterItsConnectionIsForciblyKilled.
+            verify(mocked.constructed().get(0)).close();
+        }
+    }
+
+    @Test
+    public void repeatedConnectionFailuresWithinTheThrottleWindowAreNotAllLogged() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        Logger julLogger = Logger.getLogger(RedisListenOperation.class.getName());
+        List<LogRecord> severeRecords = new CopyOnWriteArrayList<>();
+        Handler captor = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel() == Level.SEVERE) {
+                    severeRecords.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        julLogger.addHandler(captor);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new JedisConnectionException("Broken pipe (Write failed)")))) {
+            op.start(listener, new RedisListenManager());
+            // Two backoff cycles (5s each, real) + margin: iteration 1 fails on the original
+            // (mocked) connection and is logged; the reconnect attempt it triggers fails for real
+            // (see the note in the test above -- the replacement connection is genuinely
+            // constructed on the poll thread, unmocked, and genuinely fails to init() against this
+            // test's incomplete connection properties), leaving the connection null; iteration 2
+            // then fails again via the "no connection available" guard -- still within the 5-minute
+            // throttle window, so it must NOT be logged again.
+            Thread.sleep(11_000);
+            op.stop();
+
+            assertEquals("only the first failure in an ongoing outage should be logged while within "
+                    + "the throttle window", 1, severeRecords.size());
+        } finally {
+            julLogger.removeHandler(captor);
         }
     }
 

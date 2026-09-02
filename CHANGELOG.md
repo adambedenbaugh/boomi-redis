@@ -18,6 +18,12 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Fixed
 - Send's List mode (`RPUSH`) now raises a descriptive error when the target key already holds a
   non-List value in Redis, instead of a raw `WRONGTYPE` exception.
+- Listen now self-heals from a broken Redis connection (broken pipe, connection reset, read
+  timeout) by automatically closing and rebuilding it, instead of retrying the same dead socket
+  forever. Repeated failures during a sustained outage are now throttled to at most one logged
+  entry per 5 minutes (previously logged unconditionally every 5-second retry, which could fill
+  the container log at scale — one production incident logged ~4800 identical stack traces over
+  ~7 hours before a manual listener restart).
 
 ## [1.2.0] - 2026-08-14
 
