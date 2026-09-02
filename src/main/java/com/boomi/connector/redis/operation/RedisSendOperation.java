@@ -29,6 +29,7 @@ public class RedisSendOperation extends BaseUpdateOperation {
 		logger = response.getLogger();
 
 		String queueType = getContext().getOperationProperties().getProperty("queue_type", "List");
+		String keyPrefix = getContext().getOperationProperties().getProperty("key_prefix", "");
 		RedisConnection redisConnection = new RedisConnection(getContext());
 
 		try {
@@ -48,7 +49,7 @@ public class RedisSendOperation extends BaseUpdateOperation {
 						throw new ConnectorException("The document is missing a \"value\" field.");
 					}
 
-					send(redisConnection, queueType, key, value);
+					send(redisConnection, queueType, keyPrefix + key, value);
 					response.addEmptyResult(input, OperationStatus.SUCCESS, "200", "OK");
 				} catch (Exception e) {
 					logger.log(Level.SEVERE, "Details of Exception:", e);

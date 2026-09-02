@@ -56,6 +56,39 @@ public class RedisSendOperationTest {
     }
 
     @Test
+    public void listModePrependsKeyPrefixToKey() throws Exception {
+        opProps.put("key_prefix", "prefix:");
+        tester.setOperationContext(OperationType.EXECUTE, connProps, opProps, "Send", null);
+        String payload = "{\"key\": \"q\", \"value\": \"v\"}";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+            List<SimpleOperationResult> results = tester.executeExecuteOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
+            verify(mocked.constructed().get(0)).rpush("prefix:q", "v");
+        }
+    }
+
+    @Test
+    public void streamModePrependsKeyPrefixToKey() throws Exception {
+        opProps.put("queue_type", "Stream");
+        opProps.put("key_prefix", "prefix:");
+        tester.setOperationContext(OperationType.EXECUTE, connProps, opProps, "Send", null);
+        String payload = "{\"key\": \"s\", \"value\": \"v\"}";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class)) {
+            List<SimpleOperationResult> results = tester.executeExecuteOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
+            verify(mocked.constructed().get(0)).xadd("prefix:s", "v");
+        }
+    }
+
+    @Test
     public void streamModeCallsXadd() throws Exception {
         opProps.put("queue_type", "Stream");
         tester.setOperationContext(OperationType.EXECUTE, connProps, opProps, "Send", null);

@@ -10,8 +10,10 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Added
 - A `LISTEN` operation that consumes messages from a Redis List (simple, at-most-once via `BLPOP`)
   or a Redis Stream consumer group (reliable, at-least-once, with idle-reclaim and dead-lettering
-  after a configurable number of delivery attempts), and a matching `Send` (`EXECUTE`) producer
-  operation (`RPUSH`/`XADD`). See `docs/operation-configuration.md`.
+  after a configurable number of delivery attempts), and a matching Send producer operation
+  (`RPUSH`/`XADD`, built on the connector SDK's `EXECUTE` operation type and displayed as "Send").
+  Send also supports a Key Prefix field, matching GET/UPSERT/DELETE. See
+  `docs/operation-configuration.md`.
 
 ## [1.2.0] - 2026-08-14
 

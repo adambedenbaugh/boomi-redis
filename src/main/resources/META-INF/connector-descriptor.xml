@@ -267,7 +267,7 @@
 	    </field>
 	</operation>
 
-	<operation types="EXECUTE" supportsBrowse="true">
+	<operation types="EXECUTE" customTypeId="send" customTypeLabel="Send" supportsBrowse="true">
 		<field id="queue_type" label="Queue Type" type="string" displayType="list">
 	        <helpText>List: pushes with RPUSH (paired with a List-mode Listen's BLPOP for FIFO order). Stream:
 	            pushes with XADD (paired with a Stream-mode Listen).</helpText>
@@ -278,6 +278,10 @@
 	        <allowedValue label="Stream">
 	            <value>Stream</value>
 	        </allowedValue>
+	    </field>
+	    <field id="key_prefix" label="Key Prefix" type="string">
+	        <helpText>Prefix added to all key values.</helpText>
+	        <defaultValue></defaultValue>
 	    </field>
 	</operation>
 

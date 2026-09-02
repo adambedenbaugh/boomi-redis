@@ -143,10 +143,11 @@ Default is empty.
 > number of concurrent Listen operations plus normal GET/UPSERT/DELETE/Send
 > traffic sharing that same connection.
 
-## EXECUTE (Send)
+## Send
 
-The EXECUTE operation (Send) produces messages to a Redis List or Stream, paired
-with a LISTEN operation (consumer) on the same queue key.
+The Send operation produces messages to a Redis List or Stream, paired with a
+Listen operation (consumer) on the same queue key. It is built on the connector
+SDK's `EXECUTE` operation type, displayed as "Send" in the operation picker.
 
 ### Options tab
 
@@ -154,3 +155,5 @@ with a LISTEN operation (consumer) on the same queue key.
 - `List` — Pushes with `RPUSH`. Pair with a List-mode Listen for FIFO delivery
   order.
 - `Stream` — Pushes with `XADD`. Pair with a Stream-mode Listen.
+
+**Key Prefix** — Prepended to the key before pushing/adding. Default is empty.
