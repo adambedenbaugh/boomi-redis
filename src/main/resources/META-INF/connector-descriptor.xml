@@ -229,7 +229,9 @@
 	            value is also used as the maximum time the listener will wait for a process execution to
 	            finish before treating it as timed out and leaving the message unacknowledged for reclaim --
 	            tuning this field therefore also changes how long a slow process is given before it is
-	            abandoned.</helpText>
+	            abandoned. Note that raising this value does NOT proportionally increase how long stopping
+	            this listener (Atom shutdown/redeploy) can take - that wait is capped at a fixed 30-second
+	            ceiling regardless of this setting.</helpText>
 	        <defaultValue>60000</defaultValue>
 	        <visibilityCondition>
 	            <valueCondition fieldId="queue_type">

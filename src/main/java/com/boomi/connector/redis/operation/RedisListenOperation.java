@@ -39,6 +39,15 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      */
     private static final long DEFAULT_ACK_WAIT_TIMEOUT_MS = 60_000L;
 
+    /**
+     * Ceiling (ms) for {@link #computeJoinTimeoutMs()}'s return value. See that method's javadoc:
+     * the {@link #generation} counter -- not the join timeout -- is what actually prevents a
+     * stale poll thread from resurrecting after a timed-out {@code stop()}, so the join timeout no
+     * longer needs to scale unboundedly with operator-configured values like
+     * {@code idle_reclaim_timeout_ms}.
+     */
+    private static final long MAX_JOIN_TIMEOUT_MS = 30_000L;
+
     private final OperationContext context;
     private final String queueType;
     private final String queueKey;
@@ -111,6 +120,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
     String getDeadLetterKeyForTest() {
         return deadLetterKey;
+    }
+
+    long computeJoinTimeoutMsForTest() {
+        return computeJoinTimeoutMs();
     }
 
     /**
@@ -198,14 +211,22 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * about. When that mode is active, the join timeout must cover whichever of the two the poll
      * thread might currently be inside, so it is the max of both components (each with its own
      * 5s safety margin).
+     *
+     * <p>The result is capped at {@link #MAX_JOIN_TIMEOUT_MS} regardless of how large
+     * {@code pollBlockSeconds}/{@code ackWaitTimeoutMs} are configured. This is safe because
+     * {@link #generation} (not this join timeout) is what actually prevents a stale poll thread
+     * from resurrecting once {@code stop()} gives up waiting -- so an operator raising
+     * {@code idle_reclaim_timeout_ms} to accommodate slow processes no longer silently makes every
+     * listener stop (Atom shutdown/redeploy) take proportionally longer.
      */
     private long computeJoinTimeoutMs() {
         long redisBlockTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
+        long joinTimeoutMs = redisBlockTimeoutMs;
         if (STREAM.equals(queueType) && ackOnCompletion) {
             long ackWaitBudgetMs = ackWaitTimeoutMs + 5_000L;
-            return Math.max(redisBlockTimeoutMs, ackWaitBudgetMs);
+            joinTimeoutMs = Math.max(redisBlockTimeoutMs, ackWaitBudgetMs);
         }
-        return redisBlockTimeoutMs;
+        return Math.min(joinTimeoutMs, MAX_JOIN_TIMEOUT_MS);
     }
 
     private void runPollLoop(long myGeneration) {

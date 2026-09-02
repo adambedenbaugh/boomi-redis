@@ -467,6 +467,20 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void joinTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
+        // Regression test for the Important review finding: computeJoinTimeoutMs() used to scale
+        // unboundedly with ackWaitTimeoutMs (sourced from idle_reclaim_timeout_ms in Stream +
+        // ack-on-completion mode) -- an operator raising that field to accommodate slow processes
+        // would silently make every listener stop() (Atom shutdown/redeploy) take proportionally
+        // longer. This is safe to cap now because the generation counter, not the join timeout, is
+        // what actually prevents a stale poll thread from resurrecting once stop() gives up.
+        // idle_reclaim_timeout_ms = 300_000ms would (pre-fix) yield a join timeout of
+        // max(10_000, 300_000 + 5_000) = 305_000ms; the fix must cap it at 30_000ms instead.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
+        assertEquals(30_000L, op.computeJoinTimeoutMsForTest());
+    }
+
+    @Test
     public void reclaimSweepRedeliversMessageUnderMaxAttempts() throws Exception {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         Listener listener = mock(Listener.class);
