@@ -16,6 +16,8 @@ import com.boomi.connector.redis.util.RedisUtils;
 
 import com.google.gson.JsonObject;
 
+import redis.clients.jedis.exceptions.JedisDataException;
+
 public class RedisSendOperation extends BaseUpdateOperation {
 
 	Logger logger;
@@ -67,7 +69,15 @@ public class RedisSendOperation extends BaseUpdateOperation {
 			redisConnection.xadd(key, value);
 		} else {
 			logger.fine("Pushing to list: " + key);
-			redisConnection.rpush(key, value);
+			try {
+				redisConnection.rpush(key, value);
+			} catch (JedisDataException e) {
+				if (e.getMessage() != null && e.getMessage().startsWith("WRONGTYPE")) {
+					throw new ConnectorException("Key is a different data type in Redis. Unable to perform "
+							+ "RPUSH on non-List data types. " + e.getMessage(), e);
+				}
+				throw e;
+			}
 		}
 	}
 }

@@ -276,7 +276,7 @@
 	    </field>
 	</operation>
 
-	<operation types="EXECUTE" customTypeId="send" customTypeLabel="Send" supportsBrowse="true">
+	<operation types="EXECUTE" customTypeId="send" customTypeLabel="SEND" supportsBrowse="true">
 		<field id="queue_type" label="Queue Type" type="string" displayType="list">
 	        <helpText>List: pushes with RPUSH (paired with a List-mode Listen's BLPOP for FIFO order). Stream:
 	            pushes with XADD (paired with a Stream-mode Listen). The request document's "key" field is the

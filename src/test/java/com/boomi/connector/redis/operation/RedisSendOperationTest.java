@@ -9,6 +9,7 @@ import com.boomi.connector.testutil.SimpleOperationResult;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.MockedConstruction;
+import redis.clients.jedis.exceptions.JedisDataException;
 
 import java.io.ByteArrayInputStream;
 import java.util.Collections;
@@ -101,6 +102,25 @@ public class RedisSendOperationTest {
             assertFalse(results.isEmpty());
             assertEquals(OperationStatus.SUCCESS, results.get(0).getStatus());
             verify(mocked.constructed().get(0)).xadd("s", "v");
+        }
+    }
+
+    @Test
+    public void wrongtypeErrorOnRpushIsWrappedWithADescriptiveMessage() throws Exception {
+        String payload = "{\"key\": \"q\", \"value\": \"v\"}";
+        String redisMessage = "WRONGTYPE Operation against a key holding the wrong kind of value";
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> doThrow(new JedisDataException(redisMessage))
+                        .when(mock).rpush(anyString(), anyString()))) {
+
+            List<SimpleOperationResult> results = tester.executeExecuteOperation(
+                    Collections.singletonList(new ByteArrayInputStream(payload.getBytes())));
+
+            assertFalse(results.isEmpty());
+            assertEquals(OperationStatus.FAILURE, results.get(0).getStatus());
+            assertEquals("Key is a different data type in Redis. Unable to perform RPUSH on non-List data types. "
+                    + redisMessage, results.get(0).getMessage());
         }
     }
 

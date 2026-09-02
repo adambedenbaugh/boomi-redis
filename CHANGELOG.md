@@ -15,6 +15,10 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   Send also supports a Key Prefix field, matching GET/UPSERT/DELETE. See
   `docs/operation-configuration.md`.
 
+### Fixed
+- Send's List mode (`RPUSH`) now raises a descriptive error when the target key already holds a
+  non-List value in Redis, instead of a raw `WRONGTYPE` exception.
+
 ## [1.2.0] - 2026-08-14
 
 ### Changed
