@@ -587,6 +587,20 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void joinTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
+        // Direct coverage for computeJoinTimeoutMs()'s own ack-on-completion branch, restored in
+        // fix round 1: runReclaimSweep() calls submitStreamMessage() SYNCHRONOUSLY on the poll
+        // thread for redelivered entries, so the poll thread's own stop()-join budget must still
+        // cover that method's bounded future.get(ackWaitTimeoutMs, ...) wait -- a genuinely
+        // separate call site from the worker-pool-dispatched wait covered by the sibling test
+        // above (computeWorkerDrainTimeoutMs()). idle_reclaim_timeout_ms = 300_000ms would yield
+        // an uncapped join timeout of max(10_000, 300_000 + 5_000) = 305_000ms; it must be capped
+        // at 30_000ms instead, same ceiling and for the same reason as the worker drain timeout.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
+        assertEquals(30_000L, op.computeJoinTimeoutMsForTest());
+    }
+
+    @Test
     public void reclaimSweepRedeliversMessageUnderMaxAttempts() throws Exception {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         Listener listener = mock(Listener.class);
