@@ -392,7 +392,7 @@ public class RedisListenOperationTest {
             op.stop();
 
             verify(listener, atLeastOnce()).submit(any(com.boomi.connector.api.Payload.class));
-            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "1-1");
+            verify(mocked.constructed().get(1), atLeastOnce()).xack("s", "mygroup", "1-1");
         }
     }
 
@@ -417,7 +417,7 @@ public class RedisListenOperationTest {
             Thread.sleep(200);
             op.stop();
 
-            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "2-1");
+            verify(mocked.constructed().get(1), atLeastOnce()).xack("s", "mygroup", "2-1");
         }
     }
 
@@ -442,7 +442,7 @@ public class RedisListenOperationTest {
             Thread.sleep(200);
             op.stop();
 
-            verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("3-1"));
+            verify(mocked.constructed().get(1), never()).xack(eq("s"), eq("mygroup"), eq("3-1"));
         }
     }
 
@@ -476,7 +476,7 @@ public class RedisListenOperationTest {
 
             assertTrue("stop() must return promptly once the bounded future.get() gives up",
                     System.currentTimeMillis() - startedAt < 5000);
-            verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("4-1"));
+            verify(mocked.constructed().get(1), never()).xack(eq("s"), eq("mygroup"), eq("4-1"));
         }
     }
 
@@ -556,7 +556,8 @@ public class RedisListenOperationTest {
                     + "the extended join timeout rather than timing out early -- elapsed="
                     + stopElapsedMs + "ms (expected >= 11000ms)", stopElapsedMs >= 11_000L);
             verify(mocked.constructed().get(0), times(1)).close();
-            verify(mocked.constructed().get(0), never()).xack(eq("s"), eq("mygroup"), eq("5-1"));
+            verify(mocked.constructed().get(1), times(1)).close();
+            verify(mocked.constructed().get(1), never()).xack(eq("s"), eq("mygroup"), eq("5-1"));
         }
     }
 
@@ -638,8 +639,8 @@ public class RedisListenOperationTest {
             Thread.sleep(200);
             op.stop();
 
-            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "4-1");
-            verify(mocked.constructed().get(0), never()).xadd(eq("s:dead-letter"), anyString());
+            verify(mocked.constructed().get(1), atLeastOnce()).xack("s", "mygroup", "4-1");
+            verify(mocked.constructed().get(1), never()).xadd(eq("s:dead-letter"), anyString());
             verify(listener, atLeastOnce()).submit(any(com.boomi.connector.api.Payload.class));
         }
     }
@@ -666,8 +667,8 @@ public class RedisListenOperationTest {
             Thread.sleep(200);
             op.stop();
 
-            verify(mocked.constructed().get(0), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
-            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "5-1");
+            verify(mocked.constructed().get(1), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
+            verify(mocked.constructed().get(1), atLeastOnce()).xack("s", "mygroup", "5-1");
             verify(listener, never()).submit(any(com.boomi.connector.api.Payload.class));
         }
     }
@@ -700,24 +701,14 @@ public class RedisListenOperationTest {
             Thread.sleep(200);
             op.stop();
 
-            verify(mocked.constructed().get(0), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
-            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "6-1");
+            verify(mocked.constructed().get(1), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
+            verify(mocked.constructed().get(1), atLeastOnce()).xack("s", "mygroup", "6-1");
             verify(listener, never()).submit(any(com.boomi.connector.api.Payload.class));
         }
     }
 
     @Test(timeout = 15000)
     public void reclaimSweepStopsProcessingRemainingEntriesOnceStoppingIsSignaled() throws Exception {
-        // Regression test for the Critical review finding: runReclaimSweep()'s for-loop had no
-        // stopping/interrupted check between iterations, so if stop() raced ahead while a sweep
-        // was still working through multiple pending entries, redisConnection could be torn down
-        // out from under the loop with no null guard at any of its four call sites. The fix adds
-        // a stopping.get() check at the top of each iteration; this test proves that check
-        // actually short-circuits the remaining entries once stop() is invoked mid-sweep, and
-        // that no exception escapes. It intentionally does NOT test wall-clock join-timeout math
-        // (that is already covered by the two prior timeout regression tests in this class) --
-        // this fix's mechanism depends on the stopping flag being observed between iterations,
-        // not on timeout arithmetic.
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         Listener listener = mock(Listener.class);
         when(listener.isStopping()).thenReturn(false);
@@ -740,11 +731,6 @@ public class RedisListenOperationTest {
                     .thenReturn(java.util.Collections.emptyList());
             when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
                     .thenReturn(java.util.Arrays.asList(pending1, pending2, pending3));
-            // Processing the first pending entry takes real (short) time -- long enough for a
-            // concurrently-invoked stop() to set `stopping` before this sweep's loop reaches
-            // entry 2/3. Ignores interrupts, matching the "uninterruptible blocking call" pattern
-            // used elsewhere in this class -- stop()'s (harmless) interrupt() call must not
-            // shorten this wait.
             when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-1"))).thenAnswer(invocation -> {
                 long deadline = System.currentTimeMillis() + 300L;
                 while (System.currentTimeMillis() < deadline) {
@@ -756,28 +742,25 @@ public class RedisListenOperationTest {
                 }
                 return claimed1;
             });
-            // Stubbed so that if the fix regresses and the loop keeps going past stop(), these
-            // calls would succeed and the "never()" assertions below would fail loudly, rather
-            // than silently passing because xclaim happened to return null for an unstubbed call.
             when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-2"))).thenReturn(claimed2);
             when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-3"))).thenReturn(claimed3);
         })) {
             op.start(listener, new RedisListenManager());
-            // Let the poll thread begin the sweep and enter the ~300ms xclaim("10-1") call before
-            // invoking stop() concurrently from this (the test) thread.
             Thread.sleep(100L);
 
             op.stop();
 
-            RedisConnection connection = mocked.constructed().get(0);
-            verify(connection, times(1)).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-1"));
-            verify(connection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-2"));
-            verify(connection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-3"));
+            RedisConnection pollConnection = mocked.constructed().get(0);
+            RedisConnection ackConnection = mocked.constructed().get(1);
+            verify(ackConnection, times(1)).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-1"));
+            verify(ackConnection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-2"));
+            verify(ackConnection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("10-3"));
             verify(listener, times(1)).submit(any(com.boomi.connector.api.Payload.class));
-            verify(connection, times(1)).xack(eq("s"), eq("mygroup"), eq("10-1"));
-            verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-2"));
-            verify(connection, never()).xack(eq("s"), eq("mygroup"), eq("10-3"));
-            verify(connection, times(1)).close();
+            verify(ackConnection, times(1)).xack(eq("s"), eq("mygroup"), eq("10-1"));
+            verify(ackConnection, never()).xack(eq("s"), eq("mygroup"), eq("10-2"));
+            verify(ackConnection, never()).xack(eq("s"), eq("mygroup"), eq("10-3"));
+            verify(pollConnection, times(1)).close();
+            verify(ackConnection, times(1)).close();
         }
     }
 
@@ -898,6 +881,42 @@ public class RedisListenOperationTest {
                     + "called blpop() on the second connection concurrently with the current poll "
                     + "thread)",
                     maxConcurrentSecondConnectionCalls.get() <= 1);
+            verify(mocked.constructed().get(1), times(1)).close();
+        }
+    }
+
+    @Test
+    public void listModeNeverCreatesAckConnection() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt())).thenReturn(null))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            assertEquals("List mode has no ack step and must never construct a second connection",
+                    1, mocked.constructed().size());
+        }
+    }
+
+    @Test
+    public void streamModeCreatesTwoConnectionsPollAndAckBothClosedOnStop() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            op.stop();
+
+            assertEquals("Stream mode needs a dedicated ack connection alongside the poll connection",
+                    2, mocked.constructed().size());
+            verify(mocked.constructed().get(0), times(1)).close();
             verify(mocked.constructed().get(1), times(1)).close();
         }
     }

@@ -92,7 +92,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private final AtomicLong generation = new AtomicLong();
     private volatile Thread pollThread;
     private volatile Listener listener;
-    private volatile RedisConnection redisConnection;
+    private volatile RedisConnection pollConnection;
+    private volatile RedisConnection ackConnection;
+    private final Object ackConnectionLock = new Object();
     private volatile long lastReclaimSweepAt = 0L;
     private volatile int consecutiveFailures = 0;
     private volatile long lastLoggedFailureAtMillis = 0L;
@@ -173,26 +175,29 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     @Override
     public void start(Listener listener, RedisListenManager manager) {
         this.listener = listener;
-        // Build and initialize the connection into a LOCAL variable first, not the instance field.
-        // If init() or xgroupCreate() throws (wrong Redis type at Queue Key, unreachable Redis,
-        // etc.), the exception must still propagate out of start() (the SDK contract requires
-        // start() to throw on failure) -- but the connection must never leak: on the pooled path a
-        // leaked reference permanently pins the shared pool's active-reference count so the
-        // evictor can never reclaim it, and on the unpooled path it leaks a live socket. Only
-        // assigning `this.redisConnection` after setup has fully succeeded also means a
-        // partially-failed start() leaves the instance's state clean for a subsequent start()
-        // attempt, rather than pointing at a half-initialized connection.
-        RedisConnection connection = new RedisConnection(context);
+        // Same "build into locals first, only assign to instance fields on full success" discipline
+        // as before -- now for a PAIR of connections. If ack.init() fails after poll.init() and
+        // poll.xgroupCreate() already succeeded, both must still be closed rather than leaking the
+        // half-built pair.
+        RedisConnection poll = new RedisConnection(context);
+        RedisConnection ack = null;
         try {
-            connection.init();
+            poll.init();
             if (STREAM.equals(queueType)) {
-                connection.xgroupCreate(queueKey, consumerGroupName);
+                poll.xgroupCreate(queueKey, consumerGroupName);
+                // List mode has no ack step and never gets a second connection at all.
+                ack = new RedisConnection(context);
+                ack.init();
             }
         } catch (RuntimeException e) {
-            connection.close();
+            poll.close();
+            if (ack != null) {
+                ack.close();
+            }
             throw e;
         }
-        this.redisConnection = connection;
+        this.pollConnection = poll;
+        this.ackConnection = ack;
         final long myGeneration = generation.incrementAndGet();
         this.stopping.set(false);
         this.pollThread = new Thread(() -> runPollLoop(myGeneration), "Redis Listen: " + queueKey);
@@ -222,9 +227,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             }
             pollThread = null;
         }
-        if (redisConnection != null) {
-            redisConnection.close();
-            redisConnection = null;
+        if (pollConnection != null) {
+            pollConnection.close();
+            pollConnection = null;
+        }
+        if (ackConnection != null) {
+            ackConnection.close();
+            ackConnection = null;
         }
     }
 
@@ -287,8 +296,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 // broken pipe) AND whenever the connection is currently null (a previous reconnect
                 // attempt hasn't succeeded yet) -- the latter is what makes retrying self-sustaining
                 // across repeated failures rather than only reacting once to the initial break.
-                if (e instanceof JedisConnectionException || redisConnection == null) {
-                    reconnectQuietly();
+                if (e instanceof JedisConnectionException || pollConnection == null) {
+                    reconnectPollQuietly();
                 }
                 backoff();
             }
@@ -306,7 +315,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     /**
-     * Replaces a broken {@link #redisConnection} after a {@link JedisConnectionException} (broken
+     * Replaces a broken {@link #pollConnection} after a {@link JedisConnectionException} (broken
      * pipe, read timeout, or Jedis's own "broken connection" fail-fast). Jedis never repairs a
      * broken {@code Connection} internally -- without this, the poll loop would retry the exact
      * same dead socket forever, which previously required a human to manually stop/start the
@@ -316,9 +325,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * and re-checks {@link #stopping} before publishing the new connection so a reconnect that
      * outlasts a concurrent {@code stop()}'s join timeout never leaks it.
      */
-    private void reconnectQuietly() {
-        RedisConnection old = this.redisConnection;
-        this.redisConnection = null;
+    private void reconnectPollQuietly() {
+        RedisConnection old = this.pollConnection;
+        this.pollConnection = null;
         if (old != null) {
             try {
                 old.close();
@@ -343,7 +352,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             fresh.close();
             return;
         }
-        this.redisConnection = fresh;
+        this.pollConnection = fresh;
     }
 
     /**
@@ -375,7 +384,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     private void pollList() {
-        RedisConnection connection = redisConnection;
+        RedisConnection connection = pollConnection;
         if (connection == null) {
             if (stopping.get()) {
                 // Legitimate shutdown race: stop() already closed and nulled the connection while
@@ -400,7 +409,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     private void pollStream() {
-        RedisConnection connection = redisConnection;
+        RedisConnection connection = pollConnection;
         if (connection == null) {
             if (stopping.get()) {
                 logger.warning("Skipping stream poll for " + queueKey + ": the Redis connection was "
@@ -446,14 +455,14 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * mid-iteration.
      */
     private void runReclaimSweep() {
-        RedisConnection connection = redisConnection;
-        if (connection == null) {
+        RedisConnection poll = pollConnection;
+        if (poll == null) {
             logger.warning("Skipping reclaim sweep for " + queueKey + ": the Redis connection was "
                     + "already closed by stop().");
             return;
         }
         List<com.boomi.connector.redis.connection.RedisStreamPendingMessage> pending =
-                connection.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
+                poll.xpendingIdle(queueKey, consumerGroupName, idleReclaimTimeoutMs, 100);
         for (com.boomi.connector.redis.connection.RedisStreamPendingMessage p : pending) {
             if (stopping.get()) {
                 logger.fine("Reclaim sweep for " + queueKey + " stopping early: shutdown was "
@@ -462,14 +471,16 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 break;
             }
 
-            connection = redisConnection;
-            if (connection == null) {
-                logger.warning("Aborting reclaim sweep for " + queueKey + ": the Redis connection "
-                        + "was closed by stop() mid-sweep.");
-                break;
+            RedisStreamMessage claimed;
+            synchronized (ackConnectionLock) {
+                RedisConnection ack = ackConnection;
+                if (ack == null) {
+                    logger.warning("Aborting reclaim sweep for " + queueKey + ": the ack connection "
+                            + "was closed by stop() mid-sweep.");
+                    break;
+                }
+                claimed = ack.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
             }
-
-            RedisStreamMessage claimed = connection.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
             if (claimed == null) {
                 continue;
             }
@@ -480,15 +491,17 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             // stale pre-claim count let one extra delivery through past max_delivery_attempts.
             long deliveryCountAfterClaim = p.getDeliveryCount() + 1;
             if (deliveryCountAfterClaim > maxDeliveryAttempts) {
-                connection = redisConnection;
-                if (connection == null) {
-                    logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from "
-                            + queueKey + ": the Redis connection was closed by stop() mid-sweep. "
-                            + "The message remains pending and is eligible for a future reclaim.");
-                    break;
+                synchronized (ackConnectionLock) {
+                    RedisConnection ack = ackConnection;
+                    if (ack == null) {
+                        logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from "
+                                + queueKey + ": the ack connection was closed by stop() mid-sweep. "
+                                + "The message remains pending and is eligible for a future reclaim.");
+                        break;
+                    }
+                    ack.xadd(deadLetterKey, claimed.getValue());
+                    ack.xack(queueKey, consumerGroupName, claimed.getId());
                 }
-                connection.xadd(deadLetterKey, claimed.getValue());
-                connection.xack(queueKey, consumerGroupName, claimed.getId());
                 logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
                         + " after " + deliveryCountAfterClaim + " delivery attempts.");
             } else {
@@ -531,20 +544,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 ListenerExecutionResult result = future.get(ackWaitTimeoutMs, TimeUnit.MILLISECONDS);
                 if (result.isSuccess()) {
-                    // stop() may have raced ahead and torn down redisConnection while this thread
-                    // was parked in future.get() above (e.g. stop() invoked with an
-                    // even-slower-than-expected process, beyond what computeJoinTimeoutMs()
-                    // budgeted for). Read the volatile field once into a local so the null-check
-                    // and the use below observe the same value.
-                    RedisConnection connection = redisConnection;
-                    if (connection != null) {
-                        connection.xack(queueKey, consumerGroupName, message.getId());
-                    } else {
-                        logger.warning("Cannot acknowledge stream message " + message.getId() + " on "
-                                + queueKey + ": the Redis connection was already closed by stop() while "
-                                + "this process execution was in flight. The message remains "
-                                + "unacknowledged and is eligible for reclaim.");
-                    }
+                    ackQuietly(message.getId());
                 } else {
                     logger.warning("Process execution failed for stream message " + message.getId()
                             + " on " + queueKey + "; leaving unacknowledged for reclaim.");
@@ -561,20 +561,26 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             }
         } else {
             listener.submit(PayloadUtil.toPayload(json));
-            // stop() may have raced ahead and torn down redisConnection while listener.submit()
-            // was in flight -- this ack-on-submission branch has no bounded wait like the
-            // ack-on-completion branch above, but listener.submit() is not guaranteed to return
-            // instantaneously. Read the volatile field once into a local so the null-check and the
-            // use below observe the same value, matching the guard above.
-            RedisConnection connection = redisConnection;
-            if (connection != null) {
-                connection.xack(queueKey, consumerGroupName, message.getId());
-            } else {
-                logger.warning("Cannot acknowledge stream message " + message.getId() + " on "
-                        + queueKey + ": the Redis connection was already closed by stop() while "
-                        + "listener.submit() was in flight. The message remains unacknowledged "
-                        + "and is eligible for reclaim.");
+            ackQuietly(message.getId());
+        }
+    }
+
+    /**
+     * Acknowledges one Stream message under {@link #ackConnectionLock}. A single Jedis connection
+     * is not thread-safe, and once Task 3 introduces a worker pool, multiple workers can reach this
+     * call concurrently -- the lock serializes every {@code ackConnection} command so no two
+     * commands are ever in flight on the same socket at once.
+     */
+    private void ackQuietly(String messageId) {
+        synchronized (ackConnectionLock) {
+            RedisConnection connection = ackConnection;
+            if (connection == null) {
+                logger.warning("Cannot acknowledge stream message " + messageId + " on " + queueKey
+                        + ": the ack connection was already closed by stop(). The message remains "
+                        + "unacknowledged and is eligible for reclaim.");
+                return;
             }
+            connection.xack(queueKey, consumerGroupName, messageId);
         }
     }
 
