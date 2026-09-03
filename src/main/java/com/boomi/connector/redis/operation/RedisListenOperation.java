@@ -5,7 +5,10 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -95,6 +98,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private volatile RedisConnection pollConnection;
     private volatile RedisConnection ackConnection;
     private final Object ackConnectionLock = new Object();
+    private volatile ExecutorService workerPool;
+    private volatile Semaphore executionPermits;
     private volatile long lastReclaimSweepAt = 0L;
     private volatile int consecutiveFailures = 0;
     private volatile long lastLoggedFailureAtMillis = 0L;
@@ -152,6 +157,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         return computeJoinTimeoutMs();
     }
 
+    long computeWorkerDrainTimeoutMsForTest() {
+        return computeWorkerDrainTimeoutMs();
+    }
+
     int getConcurrentExecutionsForTest() {
         return concurrentExecutions;
     }
@@ -198,6 +207,12 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         }
         this.pollConnection = poll;
         this.ackConnection = ack;
+        this.workerPool = Executors.newFixedThreadPool(concurrentExecutions, r -> {
+            Thread t = new Thread(r, "Redis Listen Worker: " + queueKey);
+            t.setDaemon(true);
+            return t;
+        });
+        this.executionPermits = new Semaphore(concurrentExecutions);
         final long myGeneration = generation.incrementAndGet();
         this.stopping.set(false);
         this.pollThread = new Thread(() -> runPollLoop(myGeneration), "Redis Listen: " + queueKey);
@@ -209,15 +224,6 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     public void stop() {
         stopping.set(true);
         if (pollThread != null) {
-            // interrupt() is harmless and helps when the poll thread happens to be sleeping in
-            // backoff() rather than blocked inside a Redis call, but it has no effect on a
-            // blocking Jedis socket read (blpop() reads from a plain java.net.Socket, not an
-            // interruptible NIO channel). The join timeout below is what actually guarantees
-            // correctness: it must always outlast the poll thread's current in-flight blocking
-            // call (bounded by pollBlockSeconds) -- and, in Stream ack-on-completion mode, the
-            // in-flight future.get(ackWaitTimeoutMs, ...) wait in submitStreamMessage() -- so
-            // join() returns because the thread genuinely terminated -- not because it timed out
-            // while the poll thread is still using the connection we are about to close.
             pollThread.interrupt();
             long joinTimeoutMs = computeJoinTimeoutMs();
             try {
@@ -226,6 +232,22 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 Thread.currentThread().interrupt();
             }
             pollThread = null;
+        }
+        ExecutorService pool = workerPool;
+        if (pool != null) {
+            pool.shutdown();
+            try {
+                if (!pool.awaitTermination(computeWorkerDrainTimeoutMs(), TimeUnit.MILLISECONDS)) {
+                    // A worker is still running past the drain budget (e.g. a pathological Future
+                    // that ignores its own timeout) -- stop() must still return per the SDK contract,
+                    // so abandon it rather than block indefinitely.
+                    pool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                pool.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            workerPool = null;
         }
         if (pollConnection != null) {
             pollConnection.close();
@@ -240,32 +262,36 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     /**
-     * Computes how long {@link #stop()} should wait on {@code pollThread.join(...)}.
-     *
-     * <p>The base budget covers the Redis-side blocking call ({@code blpop}/{@code xreadGroup}),
-     * sized from {@code pollBlockSeconds} with a floor of 10s and a 5s safety margin. In Stream
-     * mode with ack-on-completion, the poll thread can also be parked in
-     * {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
-     * a second, independent source of in-flight blocking that the base budget knows nothing
-     * about. When that mode is active, the join timeout must cover whichever of the two the poll
-     * thread might currently be inside, so it is the max of both components (each with its own
-     * 5s safety margin).
-     *
-     * <p>The result is capped at {@link #MAX_JOIN_TIMEOUT_MS} regardless of how large
-     * {@code pollBlockSeconds}/{@code ackWaitTimeoutMs} are configured. This is safe because
-     * {@link #generation} (not this join timeout) is what actually prevents a stale poll thread
-     * from resurrecting once {@code stop()} gives up waiting -- so an operator raising
-     * {@code idle_reclaim_timeout_ms} to accommodate slow processes no longer silently makes every
-     * listener stop (Atom shutdown/redeploy) take proportionally longer.
+     * Computes how long {@link #stop()} should wait on {@code pollThread.join(...)}. Covers only
+     * the poll thread's own blocking Redis call ({@code blpop}/{@code xreadGroup}) -- the
+     * ack-on-completion wait no longer runs on this thread (see {@link #computeWorkerDrainTimeoutMs()}),
+     * since it now happens on a worker thread from {@link #workerPool}.
      */
     private long computeJoinTimeoutMs() {
         long redisBlockTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
-        long joinTimeoutMs = redisBlockTimeoutMs;
+        return Math.min(redisBlockTimeoutMs, MAX_JOIN_TIMEOUT_MS);
+    }
+
+    /**
+     * Computes how long {@link #stop()} should wait on {@code workerPool.awaitTermination(...)}.
+     * In Stream ack-on-completion mode a worker can be parked in
+     * {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
+     * this budget must cover that wait, mirroring what {@link #computeJoinTimeoutMs()} used to
+     * cover before that wait moved off the poll thread. Since workers run in parallel, this bound
+     * does not need to grow with {@link #concurrentExecutions} -- every worker is independently
+     * bounded by the same {@code ackWaitTimeoutMs}, so the slowest one still finishes within one
+     * such window, not N of them stacked sequentially. Capped at {@link #MAX_JOIN_TIMEOUT_MS} for
+     * the same reason {@link #computeJoinTimeoutMs()} is: the {@link #generation} counter, not this
+     * timeout, is what actually prevents stale state from resurrecting.
+     */
+    private long computeWorkerDrainTimeoutMs() {
+        long baseMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
+        long drainTimeoutMs = baseMs;
         if (STREAM.equals(queueType) && ackOnCompletion) {
             long ackWaitBudgetMs = ackWaitTimeoutMs + 5_000L;
-            joinTimeoutMs = Math.max(redisBlockTimeoutMs, ackWaitBudgetMs);
+            drainTimeoutMs = Math.max(baseMs, ackWaitBudgetMs);
         }
-        return Math.min(joinTimeoutMs, MAX_JOIN_TIMEOUT_MS);
+        return Math.min(drainTimeoutMs, MAX_JOIN_TIMEOUT_MS);
     }
 
     private void runPollLoop(long myGeneration) {
@@ -404,9 +430,50 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             throw new ConnectorException("No Redis connection is currently available for queue " + queueKey
                     + " after a previous connection failure. A reconnect attempt will be retried.");
         }
-        String value = connection.blpop(queueKey, pollBlockSeconds);
-        if (value != null) {
-            listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
+        // Captured locally (not re-read from the volatile field later) so that a stale-generation
+        // thread's eventual release() targets the SAME Semaphore instance it acquired from, even if
+        // a concurrent start()/stop() cycle has since replaced executionPermits with a new instance
+        // for the current generation -- releasing to the wrong instance would silently corrupt that
+        // instance's permit count.
+        Semaphore permits = executionPermits;
+        if (!acquirePermit(permits)) {
+            // Interrupted while waiting for a free execution slot -- this only happens during
+            // shutdown (stop() interrupts this thread). Nothing was read from Redis, so nothing to
+            // release; the outer loop's condition check will observe stopping/isStopping() and exit.
+            return;
+        }
+        String value;
+        try {
+            value = connection.blpop(queueKey, pollBlockSeconds);
+        } catch (RuntimeException e) {
+            permits.release();
+            throw e;
+        }
+        if (value == null) {
+            permits.release();
+            return;
+        }
+        dispatchListItem(value, permits);
+    }
+
+    private void dispatchListItem(String value, Semaphore permits) {
+        ExecutorService pool = workerPool;
+        pool.submit(() -> {
+            try {
+                listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
+            } finally {
+                permits.release();
+            }
+        });
+    }
+
+    private boolean acquirePermit(Semaphore permits) {
+        try {
+            permits.acquire();
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -421,17 +488,46 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             throw new ConnectorException("No Redis connection is currently available for queue " + queueKey
                     + " after a previous connection failure. A reconnect attempt will be retried.");
         }
-        List<RedisStreamMessage> messages = connection.xreadGroup(
-                queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);
-        for (RedisStreamMessage message : messages) {
-            submitStreamMessage(message);
+        Semaphore permits = executionPermits;
+        if (!acquirePermit(permits)) {
+            return;
+        }
+        List<RedisStreamMessage> messages;
+        try {
+            messages = connection.xreadGroup(
+                    queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);
+        } catch (RuntimeException e) {
+            permits.release();
+            throw e;
+        }
+        if (messages.isEmpty()) {
+            permits.release();
+        } else {
+            for (RedisStreamMessage message : messages) {
+                dispatchStreamMessage(message, permits);
+            }
         }
 
         long now = System.currentTimeMillis();
         if (now - lastReclaimSweepAt >= idleReclaimTimeoutMs) {
+            // Unchanged from before Task 3: the reclaim sweep runs synchronously on the poll thread,
+            // not dispatched to the worker pool, and its own submitStreamMessage() calls (for
+            // redelivered entries under the attempt limit) do not interact with executionPermits --
+            // that accounting only governs the main read-loop's dispatch path above.
             runReclaimSweep();
             lastReclaimSweepAt = now;
         }
+    }
+
+    private void dispatchStreamMessage(RedisStreamMessage message, Semaphore permits) {
+        ExecutorService pool = workerPool;
+        pool.submit(() -> {
+            try {
+                submitStreamMessage(message);
+            } finally {
+                permits.release();
+            }
+        });
     }
 
     /**

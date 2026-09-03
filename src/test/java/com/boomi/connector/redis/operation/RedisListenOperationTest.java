@@ -481,37 +481,13 @@ public class RedisListenOperationTest {
     }
 
     @Test(timeout = 30000)
-    public void stopJoinTimeoutCoversRealAckOnCompletionFutureWait() throws Exception {
-        // Regression test for the Critical review finding: stop()'s join-timeout formula must
-        // also cover submitStreamMessage()'s bounded future.get(ackWaitTimeoutMs, ...) wait, not
-        // just the Redis-side blocking call budget -- otherwise stop() can race ahead, close()
-        // redisConnection, and null it out while the poll thread is still parked in future.get(),
-        // producing a raw NPE (or worse, a second concurrent poll thread) once that call returns.
-        //
-        // idle_reclaim_timeout_ms = 20_000ms => ackWaitTimeoutMs = 20_000. With poll_block_ms at
-        // its 1_000ms default, the Redis-side component of the OLD (pre-fix) join formula is
-        // max(10_000, 1_000 + 5_000) = 10_000ms -- it never considers ackWaitTimeoutMs at all. The
-        // NEW formula additionally takes max(..., ackWaitTimeoutMs + 5_000) = max(10_000, 25_000)
-        // = 25_000ms.
-        //
-        // The mocked Future's get(timeout, unit) does a REAL Thread.sleep(11_500ms) before
-        // throwing TimeoutException -- not an instant answer -- so wall-clock time is what
-        // actually discriminates old vs. new behavior here, per the lesson from the immediately
-        // preceding task (an instantly-answering mock proves nothing about real timing races):
-        //   - OLD formula (10_000ms join budget): join() times out at ~10s, while the poll thread
-        //     is still 1.5s away from returning from its 11.5s real sleep inside future.get().
-        //     stop() proceeds to redisConnection.close(); redisConnection = null while the poll
-        //     thread is still in flight -- exactly the race the review finding describes.
-        //   - NEW formula (25_000ms join budget): join() comfortably outlasts the 11.5s real wait,
-        //     so the poll thread has already returned from future.get() (and, since the future
-        //     throws TimeoutException, taken the timeout-log branch without touching
-        //     redisConnection) by the time join() returns and stop() proceeds to close().
-        //
-        // Assertions: stop() must return within the new ~25s budget (not hang), no exception must
-        // escape stop() (the outer runPollLoop() catch would swallow an NPE from a stale-connection
-        // xack -- but there is no xack call on this path at all, since the future times out rather
-        // than succeeding), and stop() must have genuinely waited out the real 11.5s in-flight
-        // call rather than timing out early.
+    public void stopWaitsForWorkerPoolToDrainRealAckOnCompletionFutureWaitBeforeClosingConnections()
+            throws Exception {
+        // idle_reclaim_timeout_ms = 20_000ms => computeWorkerDrainTimeoutMs() = max(10_000, 25_000)
+        // = 25_000ms. The worker's future.get() does a REAL ~11.5s sleep before throwing
+        // TimeoutException -- proving stop() genuinely waits for the WORKER POOL to drain (via
+        // awaitTermination) rather than assuming the poll thread's own (now-much-shorter) join
+        // covers this wait.
         RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 20_000L));
         Listener listener = mock(Listener.class);
         when(listener.isStopping()).thenReturn(false);
@@ -604,17 +580,15 @@ public class RedisListenOperationTest {
     }
 
     @Test
-    public void joinTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
-        // Regression test for the Important review finding: computeJoinTimeoutMs() used to scale
-        // unboundedly with ackWaitTimeoutMs (sourced from idle_reclaim_timeout_ms in Stream +
-        // ack-on-completion mode) -- an operator raising that field to accommodate slow processes
-        // would silently make every listener stop() (Atom shutdown/redeploy) take proportionally
-        // longer. This is safe to cap now because the generation counter, not the join timeout, is
-        // what actually prevents a stale poll thread from resurrecting once stop() gives up.
-        // idle_reclaim_timeout_ms = 300_000ms would (pre-fix) yield a join timeout of
-        // max(10_000, 300_000 + 5_000) = 305_000ms; the fix must cap it at 30_000ms instead.
+    public void workerDrainTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
-        assertEquals(30_000L, op.computeJoinTimeoutMsForTest());
+        assertEquals(30_000L, op.computeWorkerDrainTimeoutMsForTest());
+    }
+
+    @Test
+    public void joinTimeoutNoLongerScalesWithAckWaitBudgetSinceThatWaitMovedToWorkerThreads() {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
+        assertEquals(10_000L, op.computeJoinTimeoutMsForTest());
     }
 
     @Test
@@ -918,6 +892,149 @@ public class RedisListenOperationTest {
                     2, mocked.constructed().size());
             verify(mocked.constructed().get(0), times(1)).close();
             verify(mocked.constructed().get(1), times(1)).close();
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void concurrentExecutionsBoundsHowManyDispatchedWorkersRunAtOnce() throws Exception {
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(2L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        AtomicInteger activeWorkers = new AtomicInteger(0);
+        AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
+        doAnswer(invocation -> {
+            int current = activeWorkers.incrementAndGet();
+            try {
+                maxObservedConcurrency.updateAndGet(max -> Math.max(max, current));
+                Thread.sleep(300L);
+            } finally {
+                activeWorkers.decrementAndGet();
+            }
+            return null;
+        }).when(listener).submit(any(com.boomi.connector.api.Payload.class));
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenReturn("a").thenReturn("b").thenReturn("c").thenReturn(null))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(1500L);
+            op.stop();
+
+            assertTrue("at least two workers must run concurrently when concurrent_executions=2",
+                    maxObservedConcurrency.get() >= 2);
+            assertTrue("no more than concurrent_executions (2) workers may run at once -- observed "
+                    + maxObservedConcurrency.get(), maxObservedConcurrency.get() <= 2);
+            verify(listener, times(3)).submit(any(com.boomi.connector.api.Payload.class));
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void ackConnectionLockSerializesConcurrentWorkerAcks() throws Exception {
+        PropertyMap connProps = mock(PropertyMap.class);
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("consumer_group_name", "")).thenReturn("mygroup");
+        when(opProps.getProperty("queue_type", "List")).thenReturn("Stream");
+        when(opProps.getProperty("queue_key", "")).thenReturn("s");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(500L);
+        when(opProps.getProperty("ack_mode", "OnCompletion")).thenReturn("OnSubmission");
+        when(opProps.getLongProperty(eq("idle_reclaim_timeout_ms"), any())).thenReturn(60000L);
+        when(opProps.getLongProperty(eq("max_delivery_attempts"), any())).thenReturn(5L);
+        when(opProps.getProperty("dead_letter_key", "")).thenReturn("");
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(4L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+        when(ctx.getConnectionProperties()).thenReturn(connProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage m1 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-1", "v1");
+        com.boomi.connector.redis.connection.RedisStreamMessage m2 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-2", "v2");
+        com.boomi.connector.redis.connection.RedisStreamMessage m3 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-3", "v3");
+
+        AtomicInteger activeAckCalls = new AtomicInteger(0);
+        AtomicInteger maxObservedConcurrentAcks = new AtomicInteger(0);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> {
+                    when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                            .thenReturn(java.util.Collections.singletonList(m1))
+                            .thenReturn(java.util.Collections.singletonList(m2))
+                            .thenReturn(java.util.Collections.singletonList(m3))
+                            .thenReturn(java.util.Collections.emptyList());
+                    doAnswer(invocation -> {
+                        int current = activeAckCalls.incrementAndGet();
+                        try {
+                            maxObservedConcurrentAcks.updateAndGet(max -> Math.max(max, current));
+                            Thread.sleep(100L);
+                        } finally {
+                            activeAckCalls.decrementAndGet();
+                        }
+                        return null;
+                    }).when(mock).xack(eq("s"), eq("mygroup"), anyString());
+                })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(2000L);
+            op.stop();
+
+            assertEquals("ackConnectionLock must serialize every xack call -- at most one worker may "
+                    + "be inside xack() at a time", 1, maxObservedConcurrentAcks.get());
+            verify(mocked.constructed().get(1), times(3)).xack(eq("s"), eq("mygroup"), anyString());
+        }
+    }
+
+    @Test(timeout = 25000)
+    public void stopForciblyShutsDownWorkerPoolWhenDrainTimeoutElapses() throws Exception {
+        // idle_reclaim_timeout_ms=1 keeps computeWorkerDrainTimeoutMs() at its 10s floor
+        // (poll_block_ms defaults to 1000 in streamContext -> baseMs = max(10_000, 6_000) = 10_000).
+        // A worker whose future.get() ignores its own timeout argument entirely (a pathological
+        // Future) must not hang stop() forever -- awaitTermination() gives up at the 10s bound and
+        // shutdownNow() is called so stop() still returns well before the mock's 20s sleep elapses.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 1L));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        @SuppressWarnings("unchecked")
+        Future<ListenerExecutionResult> hungFuture = mock(Future.class);
+        when(hungFuture.get(anyLong(), any(TimeUnit.class))).thenAnswer(invocation -> {
+            Thread.sleep(20_000L);
+            return null;
+        });
+        when(listener.submit(any(com.boomi.connector.api.Payload.class), any(SubmitOptions.class)))
+                .thenReturn(hungFuture);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("9-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200L);
+
+            long stopStartedAt = System.currentTimeMillis();
+            op.stop();
+            long stopElapsedMs = System.currentTimeMillis() - stopStartedAt;
+
+            assertTrue("stop() must return once the drain timeout elapses, even if a worker never "
+                    + "finishes -- elapsed=" + stopElapsedMs + "ms (expected < 15000ms)",
+                    stopElapsedMs < 15_000L);
         }
     }
 }
