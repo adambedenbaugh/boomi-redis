@@ -231,9 +231,11 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             pollConnection.close();
             pollConnection = null;
         }
-        if (ackConnection != null) {
-            ackConnection.close();
-            ackConnection = null;
+        synchronized (ackConnectionLock) {
+            if (ackConnection != null) {
+                ackConnection.close();
+                ackConnection = null;
+            }
         }
     }
 
