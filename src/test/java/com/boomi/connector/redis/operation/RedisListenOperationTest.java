@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
@@ -586,12 +587,6 @@ public class RedisListenOperationTest {
     }
 
     @Test
-    public void joinTimeoutNoLongerScalesWithAckWaitBudgetSinceThatWaitMovedToWorkerThreads() {
-        RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
-        assertEquals(10_000L, op.computeJoinTimeoutMsForTest());
-    }
-
-    @Test
     public void reclaimSweepRedeliversMessageUnderMaxAttempts() throws Exception {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         Listener listener = mock(Listener.class);
@@ -1009,10 +1004,20 @@ public class RedisListenOperationTest {
         Listener listener = mock(Listener.class);
         when(listener.isStopping()).thenReturn(false);
 
+        AtomicBoolean workerWasInterrupted = new AtomicBoolean(false);
         @SuppressWarnings("unchecked")
         Future<ListenerExecutionResult> hungFuture = mock(Future.class);
         when(hungFuture.get(anyLong(), any(TimeUnit.class))).thenAnswer(invocation -> {
-            Thread.sleep(20_000L);
+            try {
+                Thread.sleep(20_000L);
+            } catch (InterruptedException e) {
+                // Proves shutdownNow() genuinely interrupted this worker thread -- without this,
+                // the elapsed-time assertion below would pass identically even if shutdownNow()
+                // were never called, since awaitTermination() itself already times out at the
+                // drain bound regardless of whether the worker is ever interrupted.
+                workerWasInterrupted.set(true);
+                throw e;
+            }
             return null;
         });
         when(listener.submit(any(com.boomi.connector.api.Payload.class), any(SubmitOptions.class)))
@@ -1035,6 +1040,16 @@ public class RedisListenOperationTest {
             assertTrue("stop() must return once the drain timeout elapses, even if a worker never "
                     + "finishes -- elapsed=" + stopElapsedMs + "ms (expected < 15000ms)",
                     stopElapsedMs < 15_000L);
+
+            // interrupt() (called by shutdownNow() inside stop()) only requests interruption --
+            // the worker's catch block that records workerWasInterrupted runs asynchronously on
+            // its own thread, so give it a brief moment to actually execute before asserting on
+            // it. This is not part of the elapsed-time measurement above.
+            Thread.sleep(500L);
+            assertTrue("stop() must call shutdownNow() to interrupt the still-running worker once "
+                    + "the drain timeout elapses -- the worker's future.get() sleep was never "
+                    + "interrupted, meaning shutdownNow() either wasn't called or had no effect",
+                    workerWasInterrupted.get());
         }
     }
 }

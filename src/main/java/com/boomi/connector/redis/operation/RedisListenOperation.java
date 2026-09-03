@@ -8,6 +8,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -262,26 +263,49 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     /**
-     * Computes how long {@link #stop()} should wait on {@code pollThread.join(...)}. Covers only
-     * the poll thread's own blocking Redis call ({@code blpop}/{@code xreadGroup}) -- the
-     * ack-on-completion wait no longer runs on this thread (see {@link #computeWorkerDrainTimeoutMs()}),
-     * since it now happens on a worker thread from {@link #workerPool}.
+     * Computes how long {@link #stop()} should wait on {@code pollThread.join(...)}.
+     *
+     * <p>The base budget covers the Redis-side blocking call ({@code blpop}/{@code xreadGroup}),
+     * sized from {@code pollBlockSeconds} with a floor of 10s and a 5s safety margin. The main
+     * read loop's message dispatch now runs on {@link #workerPool} rather than this thread (see
+     * {@link #computeWorkerDrainTimeoutMs()}) -- but {@link #runReclaimSweep()} still calls
+     * {@link #submitStreamMessage(RedisStreamMessage)} SYNCHRONOUSLY on the poll thread for
+     * redelivered entries under the delivery-attempt limit, and that method's
+     * {@code future.get(ackWaitTimeoutMs, ...)} bound applies regardless of which thread calls
+     * it. So in Stream mode with ack-on-completion, the poll thread itself can still be parked in
+     * that wait via the reclaim sweep -- a second, independent source of in-flight blocking that
+     * the base budget knows nothing about. When that mode is active, the join timeout must cover
+     * whichever of the two the poll thread might currently be inside, so it is the max of both
+     * components (each with its own 5s safety margin).
+     *
+     * <p>The result is capped at {@link #MAX_JOIN_TIMEOUT_MS} regardless of how large
+     * {@code pollBlockSeconds}/{@code ackWaitTimeoutMs} are configured. This is safe because
+     * {@link #generation} (not this join timeout) is what actually prevents a stale poll thread
+     * from resurrecting once {@code stop()} gives up waiting -- so an operator raising
+     * {@code idle_reclaim_timeout_ms} to accommodate slow processes no longer silently makes every
+     * listener stop (Atom shutdown/redeploy) take proportionally longer.
      */
     private long computeJoinTimeoutMs() {
         long redisBlockTimeoutMs = Math.max(10_000L, (pollBlockSeconds * 1000L) + 5_000L);
-        return Math.min(redisBlockTimeoutMs, MAX_JOIN_TIMEOUT_MS);
+        long joinTimeoutMs = redisBlockTimeoutMs;
+        if (STREAM.equals(queueType) && ackOnCompletion) {
+            long ackWaitBudgetMs = ackWaitTimeoutMs + 5_000L;
+            joinTimeoutMs = Math.max(redisBlockTimeoutMs, ackWaitBudgetMs);
+        }
+        return Math.min(joinTimeoutMs, MAX_JOIN_TIMEOUT_MS);
     }
 
     /**
      * Computes how long {@link #stop()} should wait on {@code workerPool.awaitTermination(...)}.
-     * In Stream ack-on-completion mode a worker can be parked in
-     * {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
-     * this budget must cover that wait, mirroring what {@link #computeJoinTimeoutMs()} used to
-     * cover before that wait moved off the poll thread. Since workers run in parallel, this bound
-     * does not need to grow with {@link #concurrentExecutions} -- every worker is independently
-     * bounded by the same {@code ackWaitTimeoutMs}, so the slowest one still finishes within one
-     * such window, not N of them stacked sequentially. Capped at {@link #MAX_JOIN_TIMEOUT_MS} for
-     * the same reason {@link #computeJoinTimeoutMs()} is: the {@link #generation} counter, not this
+     * The main read loop's dispatched workers (see {@link #dispatchStreamMessage}) can be parked
+     * in {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
+     * this budget covers that ASYNC, pool-dispatched wait, which is a separate call site from the
+     * poll thread's own SYNCHRONOUS call to the same method via {@link #runReclaimSweep()} (still
+     * covered by {@link #computeJoinTimeoutMs()}). Since workers run in parallel, this bound does
+     * not need to grow with {@link #concurrentExecutions} -- every worker is independently bounded
+     * by the same {@code ackWaitTimeoutMs}, so the slowest one still finishes within one such
+     * window, not N of them stacked sequentially. Capped at {@link #MAX_JOIN_TIMEOUT_MS} for the
+     * same reason {@link #computeJoinTimeoutMs()} is: the {@link #generation} counter, not this
      * timeout, is what actually prevents stale state from resurrecting.
      */
     private long computeWorkerDrainTimeoutMs() {
@@ -431,11 +455,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     + " after a previous connection failure. A reconnect attempt will be retried.");
         }
         // Captured locally (not re-read from the volatile field later) so that a stale-generation
-        // thread's eventual release() targets the SAME Semaphore instance it acquired from, even if
-        // a concurrent start()/stop() cycle has since replaced executionPermits with a new instance
-        // for the current generation -- releasing to the wrong instance would silently corrupt that
-        // instance's permit count.
+        // thread's eventual release()/submit() targets the SAME Semaphore/ExecutorService
+        // instances it acquired from, even if a concurrent start()/stop() cycle has since replaced
+        // executionPermits/workerPool with new instances for the current generation -- releasing
+        // to the wrong Semaphore would silently corrupt its permit count, and submitting to the
+        // wrong (newer generation's) pool would run this stale thread's work on the wrong pool.
         Semaphore permits = executionPermits;
+        ExecutorService pool = workerPool;
         if (!acquirePermit(permits)) {
             // Interrupted while waiting for a free execution slot -- this only happens during
             // shutdown (stop() interrupts this thread). Nothing was read from Redis, so nothing to
@@ -453,18 +479,34 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             permits.release();
             return;
         }
-        dispatchListItem(value, permits);
+        dispatchListItem(value, pool, permits);
     }
 
-    private void dispatchListItem(String value, Semaphore permits) {
-        ExecutorService pool = workerPool;
-        pool.submit(() -> {
-            try {
-                listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
-            } finally {
-                permits.release();
-            }
-        });
+    private void dispatchListItem(String value, ExecutorService pool, Semaphore permits) {
+        if (pool == null) {
+            // stop() closed and nulled the pool while this poll cycle's blpop() call was still in
+            // flight (e.g. a call that outlasted the join/drain timeouts). Nothing to submit to --
+            // release the permit and drop the value rather than raw-NPE on pool.submit().
+            logger.warning("Skipping dispatch for a popped value from " + queueKey + ": the worker "
+                    + "pool was already closed by stop().");
+            permits.release();
+            return;
+        }
+        try {
+            pool.submit(() -> {
+                try {
+                    listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
+                } finally {
+                    permits.release();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // The pool was shut down between this method's null-check above and this submit()
+            // call -- a narrow but real race with stop(). Same recovery as the null-pool case.
+            logger.warning("Skipping dispatch for a popped value from " + queueKey + ": the worker "
+                    + "pool was shut down by stop() before the task could be submitted.");
+            permits.release();
+        }
     }
 
     private boolean acquirePermit(Semaphore permits) {
@@ -489,6 +531,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     + " after a previous connection failure. A reconnect attempt will be retried.");
         }
         Semaphore permits = executionPermits;
+        ExecutorService pool = workerPool;
         if (!acquirePermit(permits)) {
             return;
         }
@@ -504,7 +547,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             permits.release();
         } else {
             for (RedisStreamMessage message : messages) {
-                dispatchStreamMessage(message, permits);
+                dispatchStreamMessage(message, pool, permits);
             }
         }
 
@@ -519,15 +562,32 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         }
     }
 
-    private void dispatchStreamMessage(RedisStreamMessage message, Semaphore permits) {
-        ExecutorService pool = workerPool;
-        pool.submit(() -> {
-            try {
-                submitStreamMessage(message);
-            } finally {
-                permits.release();
-            }
-        });
+    private void dispatchStreamMessage(RedisStreamMessage message, ExecutorService pool, Semaphore permits) {
+        if (pool == null) {
+            // stop() closed and nulled the pool while this poll cycle's xreadGroup() call was
+            // still in flight. Nothing to submit to -- release the permit and drop the message
+            // rather than raw-NPE on pool.submit(). The message stays unacknowledged in Redis and
+            // is eligible for reclaim.
+            logger.warning("Skipping dispatch for stream message " + message.getId() + " on " + queueKey
+                    + ": the worker pool was already closed by stop().");
+            permits.release();
+            return;
+        }
+        try {
+            pool.submit(() -> {
+                try {
+                    submitStreamMessage(message);
+                } finally {
+                    permits.release();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // The pool was shut down between this method's null-check above and this submit()
+            // call -- a narrow but real race with stop(). Same recovery as the null-pool case.
+            logger.warning("Skipping dispatch for stream message " + message.getId() + " on " + queueKey
+                    + ": the worker pool was shut down by stop() before the task could be submitted.");
+            permits.release();
+        }
     }
 
     /**
