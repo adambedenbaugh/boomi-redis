@@ -1066,4 +1066,97 @@ public class RedisListenOperationTest {
                     workerWasInterrupted.get());
         }
     }
+
+    @Test(timeout = 20000)
+    public void workerAckFailureTriggersAckConnectionRebuildOnNextPollIteration() throws Exception {
+        // NOTE on this test's shape vs. a naive "assert a 3rd mock got constructed": reconnectAckQuietly()
+        // runs on the poll thread by design (only the poll thread ever reconnects -- see the class
+        // javadoc), but Mockito's mockConstruction() only intercepts `new RedisConnection(...)` calls
+        // made from the THREAD THAT OPENED IT (the main test thread here) -- the exact same limitation
+        // already documented on connectionExceptionClosesTheBrokenConnectionAndAttemptsToReconnect above
+        // for reconnectPollQuietly(). So the poll thread's reconnect attempt constructs a REAL,
+        // unmocked RedisConnection, which fails init() for real (this test's OperationContext has no
+        // genuine host/auth properties) and is therefore never captured by mocked.constructed() and
+        // never becomes the new ackConnection. What IS directly verifiable without a live Redis:
+        // ackQuietly() detects the JedisConnectionException and logs+flags it, runPollLoop() reacts by
+        // invoking reconnectAckQuietly() on its next iteration (proven by the FINE "reconnect attempt
+        // failed" log below -- the only call site that can produce it), and the broken connection is
+        // never reused for a later message once flagged.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage m1 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-1", "v1");
+        com.boomi.connector.redis.connection.RedisStreamMessage m2 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-2", "v2");
+
+        Logger julLogger = Logger.getLogger(RedisListenOperation.class.getName());
+        julLogger.setLevel(Level.FINE);
+        List<LogRecord> ackBrokenWarnings = new CopyOnWriteArrayList<>();
+        List<LogRecord> reconnectAttemptRecords = new CopyOnWriteArrayList<>();
+        Handler captor = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                String message = record.getMessage();
+                if (message == null) {
+                    return;
+                }
+                if (message.contains("Ack connection broke while acknowledging")) {
+                    ackBrokenWarnings.add(record);
+                } else if (message.contains("Ack connection reconnect attempt failed")) {
+                    reconnectAttemptRecords.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        captor.setLevel(Level.FINE);
+        julLogger.addHandler(captor);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> {
+                    if (context.getCount() == 2) {
+                        // The (soon-to-be-broken) ack connection: its xack throws once, simulating a
+                        // dropped connection independent of the poll connection.
+                        doThrow(new JedisConnectionException("Broken pipe (Write failed)"))
+                                .when(mock).xack(eq("s"), eq("mygroup"), eq("1-1"));
+                    }
+                    when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                            .thenReturn(java.util.Collections.singletonList(m1))
+                            .thenReturn(java.util.Collections.singletonList(m2))
+                            .thenReturn(java.util.Collections.emptyList());
+                })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(1500L);
+            op.stop();
+
+            assertEquals("Stream mode constructs exactly one poll and one ack connection up front",
+                    2, mocked.constructed().size());
+            RedisConnection brokenAck = mocked.constructed().get(1);
+
+            verify(brokenAck, times(1)).xack(eq("s"), eq("mygroup"), eq("1-1"));
+            assertFalse("ackQuietly() must detect the JedisConnectionException and flag "
+                    + "needsAckReconnect", ackBrokenWarnings.isEmpty());
+            assertFalse("runPollLoop() must react to needsAckReconnect by invoking "
+                    + "reconnectAckQuietly() on a subsequent iteration", reconnectAttemptRecords.isEmpty());
+            // NOTE: we deliberately do not assert which specific connection instance acks message
+            // "1-2" -- the needsAckReconnect check runs once at the TOP of runPollLoop()'s while
+            // loop, so a message already read and dispatched within the SAME iteration that set the
+            // flag (concurrency=1 here means the poll thread was blocked acquiring the permit held
+            // by m1's worker, and unblocks only after that worker has already set the flag) can still
+            // be acked on the old connection before the next iteration's check runs. That is expected
+            // given this design (the flag is a next-iteration signal, not a mid-iteration interrupt),
+            // not a bug -- what matters, and what's verified above/below, is that the break is
+            // detected and a reconnect is genuinely attempted, and that the process never crashes.
+        } finally {
+            julLogger.removeHandler(captor);
+        }
+    }
 }

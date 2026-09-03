@@ -99,6 +99,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private volatile RedisConnection pollConnection;
     private volatile RedisConnection ackConnection;
     private final Object ackConnectionLock = new Object();
+    private volatile boolean needsAckReconnect = false;
     private volatile ExecutorService workerPool;
     private volatile Semaphore executionPermits;
     private volatile long lastReclaimSweepAt = 0L;
@@ -321,6 +322,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private void runPollLoop(long myGeneration) {
         boolean wasOffline = false;
         while (generation.get() == myGeneration && !stopping.get() && !listener.isStopping()) {
+            if (needsAckReconnect) {
+                reconnectAckQuietly();
+            }
             try {
                 pollOnce();
                 if (wasOffline) {
@@ -405,6 +409,47 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             return;
         }
         this.pollConnection = fresh;
+    }
+
+    /**
+     * Rebuilds {@link #ackConnection} after a worker (or the reclaim sweep) reported it broken via
+     * {@link #needsAckReconnect}. Only the poll thread ever calls this -- workers only set the flag,
+     * never reconnect themselves -- so there is never a race between two threads swapping
+     * {@link #ackConnection} at once. Mirrors {@link #reconnectPollQuietly()}'s own discipline:
+     * build into a local first, only publish on full success, and re-check {@link #stopping} before
+     * publishing so a slow reconnect that outlasts a concurrent {@code stop()} never leaks it.
+     */
+    private void reconnectAckQuietly() {
+        RedisConnection old;
+        synchronized (ackConnectionLock) {
+            old = ackConnection;
+            ackConnection = null;
+        }
+        if (old != null) {
+            try {
+                old.close();
+            } catch (Exception closeError) {
+                logger.log(Level.FINE, "Error closing broken ack connection for " + queueKey, closeError);
+            }
+        }
+
+        RedisConnection fresh = new RedisConnection(context);
+        try {
+            fresh.init();
+        } catch (RuntimeException e) {
+            fresh.close();
+            logger.log(Level.FINE, "Ack connection reconnect attempt failed for " + queueKey, e);
+            return;
+        }
+
+        if (stopping.get()) {
+            fresh.close();
+            return;
+        }
+        synchronized (ackConnectionLock) {
+            ackConnection = fresh;
+        }
+        needsAckReconnect = false;
     }
 
     /**
@@ -629,16 +674,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 break;
             }
 
-            RedisStreamMessage claimed;
-            synchronized (ackConnectionLock) {
-                RedisConnection ack = ackConnection;
-                if (ack == null) {
-                    logger.warning("Aborting reclaim sweep for " + queueKey + ": the ack connection "
-                            + "was closed by stop() mid-sweep.");
-                    break;
-                }
-                claimed = ack.xclaim(queueKey, consumerGroupName, consumerName, p.getId());
-            }
+            RedisStreamMessage claimed = claimQuietly(p.getId());
             if (claimed == null) {
                 continue;
             }
@@ -649,17 +685,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             // stale pre-claim count let one extra delivery through past max_delivery_attempts.
             long deliveryCountAfterClaim = p.getDeliveryCount() + 1;
             if (deliveryCountAfterClaim > maxDeliveryAttempts) {
-                synchronized (ackConnectionLock) {
-                    RedisConnection ack = ackConnection;
-                    if (ack == null) {
-                        logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from "
-                                + queueKey + ": the ack connection was closed by stop() mid-sweep. "
-                                + "The message remains pending and is eligible for a future reclaim.");
-                        break;
-                    }
-                    ack.xadd(deadLetterKey, claimed.getValue());
-                    ack.xack(queueKey, consumerGroupName, claimed.getId());
-                }
+                deadLetterQuietly(claimed);
                 logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
                         + " after " + deliveryCountAfterClaim + " delivery attempts.");
             } else {
@@ -734,11 +760,71 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             RedisConnection connection = ackConnection;
             if (connection == null) {
                 logger.warning("Cannot acknowledge stream message " + messageId + " on " + queueKey
-                        + ": the ack connection was already closed by stop(). The message remains "
-                        + "unacknowledged and is eligible for reclaim.");
+                        + ": the ack connection was already closed by stop() or is being reconnected. "
+                        + "The message remains unacknowledged and is eligible for reclaim.");
                 return;
             }
-            connection.xack(queueKey, consumerGroupName, messageId);
+            try {
+                connection.xack(queueKey, consumerGroupName, messageId);
+            } catch (JedisConnectionException e) {
+                needsAckReconnect = true;
+                logger.log(Level.WARNING, "Ack connection broke while acknowledging stream message "
+                        + messageId + " on " + queueKey + "; a reconnect will be attempted on the "
+                        + "next poll iteration.", e);
+            }
+        }
+    }
+
+    /**
+     * Claims one idle-pending Stream entry during {@link #runReclaimSweep()}. Guarded the same way
+     * as {@link #ackQuietly}: a {@link JedisConnectionException} here means the ack connection --
+     * not the poll connection driving the sweep -- has broken, so it only sets
+     * {@link #needsAckReconnect} rather than reconnecting inline (only the poll thread reconnects;
+     * see {@link #reconnectAckQuietly()}). Returns {@code null} on either a missing connection or a
+     * failed claim so the sweep's caller treats both the same way: skip this entry, pick it up on a
+     * future sweep.
+     */
+    private RedisStreamMessage claimQuietly(String messageId) {
+        synchronized (ackConnectionLock) {
+            RedisConnection connection = ackConnection;
+            if (connection == null) {
+                return null;
+            }
+            try {
+                return connection.xclaim(queueKey, consumerGroupName, consumerName, messageId);
+            } catch (JedisConnectionException e) {
+                needsAckReconnect = true;
+                logger.log(Level.WARNING, "Ack connection broke while claiming pending stream message "
+                        + messageId + " on " + queueKey + "; a reconnect will be attempted on the "
+                        + "next poll iteration.", e);
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Moves one over-limit claimed message to the dead-letter stream and acks it off the original
+     * pending list, during {@link #runReclaimSweep()}. Same ack-connection guard discipline as
+     * {@link #claimQuietly}.
+     */
+    private void deadLetterQuietly(RedisStreamMessage claimed) {
+        synchronized (ackConnectionLock) {
+            RedisConnection connection = ackConnection;
+            if (connection == null) {
+                logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from " + queueKey
+                        + ": the ack connection was closed by stop() or is being reconnected. The message "
+                        + "remains pending and is eligible for a future reclaim.");
+                return;
+            }
+            try {
+                connection.xadd(deadLetterKey, claimed.getValue());
+                connection.xack(queueKey, consumerGroupName, claimed.getId());
+            } catch (JedisConnectionException e) {
+                needsAckReconnect = true;
+                logger.log(Level.WARNING, "Ack connection broke while dead-lettering stream message "
+                        + claimed.getId() + " on " + queueKey + "; a reconnect will be attempted on "
+                        + "the next poll iteration.", e);
+            }
         }
     }
 
