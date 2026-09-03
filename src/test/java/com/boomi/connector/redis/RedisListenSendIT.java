@@ -525,16 +525,19 @@ public class RedisListenSendIT {
         });
 
         op.start(listener, new RedisListenManager());
-        try (Jedis direct = directClient()) {
-            direct.xadd(queueKey, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", "slow"));
-            // Give the poll thread time to read the message and dispatch it to a worker, which is
-            // now ~2s into its submit() call, before stop() races it.
-            Thread.sleep(700L);
+        long stopElapsedMs;
+        try {
+            try (Jedis direct = directClient()) {
+                direct.xadd(queueKey, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", "slow"));
+                // Give the poll thread time to read the message and dispatch it to a worker, which
+                // is now ~2s into its submit() call, before stop() races it.
+                Thread.sleep(700L);
+            }
+        } finally {
+            long stopStartedAt = System.currentTimeMillis();
+            op.stop();
+            stopElapsedMs = System.currentTimeMillis() - stopStartedAt;
         }
-
-        long stopStartedAt = System.currentTimeMillis();
-        op.stop();
-        long stopElapsedMs = System.currentTimeMillis() - stopStartedAt;
 
         assertTrue("Expected stop() to wait for the in-flight ~2s worker execution to finish before "
                 + "returning -- elapsed=" + stopElapsedMs + "ms", stopElapsedMs >= 1000L);
