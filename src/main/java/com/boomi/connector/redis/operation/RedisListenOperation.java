@@ -55,9 +55,21 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private static final long MAX_JOIN_TIMEOUT_MS = 30_000L;
 
     /**
+     * Upper bound accepted for the "Concurrent Executions" operation property. Each concurrent
+     * execution gets its own worker thread in {@link #workerPool}, per listener, per Atom -- so an
+     * absurd configured value is a configuration error, not a tuning choice. Without an explicit
+     * bound, a value like {@code 5000000000} would be silently narrowed by the {@code long}-to-{@code
+     * int} cast to an unrelated number: either non-positive (a bare
+     * {@link IllegalArgumentException} out of {@link Executors#newFixedThreadPool}) or some large
+     * positive value (an effectively unbounded thread pool). Both violate this connector's rule
+     * that every boundary fails with a descriptive {@link ConnectorException} instead.
+     */
+    private static final long MAX_CONCURRENT_EXECUTIONS = 100L;
+
+    /**
      * How often a SEVERE "Error while polling" entry may repeat while an outage continues. The
      * first failure in a run is always logged (full visibility into a new problem); Jedis never
-     * repairs a broken {@code Connection} internally, so before {@link #reconnectQuietly()} existed
+     * repairs a broken {@code Connection} internally, so before {@link #reconnectPollQuietly()} existed
      * a dead connection meant the identical exception logged every {@link #backoff()} cycle (5s)
      * until a human manually stopped/started the listener -- observed in production as ~4800
      * identical stack traces over ~7 hours from a single stalled network read. Throttling repeats
@@ -105,6 +117,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private volatile long lastReclaimSweepAt = 0L;
     private volatile int consecutiveFailures = 0;
     private volatile long lastLoggedFailureAtMillis = 0L;
+    private volatile int consecutiveAckFailures = 0;
+    private volatile long lastLoggedAckFailureAtMillis = 0L;
 
     public RedisListenOperation(OperationContext context) {
         this.context = context;
@@ -120,6 +134,12 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
         long configuredConcurrency = longPropertyOrDefault(context.getOperationProperties(),
                 "concurrent_executions", 1L);
+        if (configuredConcurrency > MAX_CONCURRENT_EXECUTIONS) {
+            throw new ConnectorException("\"Concurrent Executions\" is " + configuredConcurrency
+                    + ", which exceeds the supported maximum of " + MAX_CONCURRENT_EXECUTIONS
+                    + ". Each concurrent execution runs on its own worker thread for this listener "
+                    + "on this Atom -- lower the value.");
+        }
         this.concurrentExecutions = (int) Math.max(1L, configuredConcurrency);
 
         if (STREAM.equals(queueType)) {
@@ -165,6 +185,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
     int getConcurrentExecutionsForTest() {
         return concurrentExecutions;
+    }
+
+    boolean getNeedsAckReconnectForTest() {
+        return needsAckReconnect;
     }
 
     /**
@@ -217,6 +241,11 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         this.executionPermits = new Semaphore(concurrentExecutions);
         final long myGeneration = generation.incrementAndGet();
         this.stopping.set(false);
+        // The freshly-built ackConnection above is healthy by construction, so a flag left set by
+        // a PREVIOUS start()/stop() cycle's broken connection must not survive into this one --
+        // otherwise the new poll thread's very first iteration would immediately tear down and
+        // rebuild a perfectly good connection, dropping any ack racing that window.
+        this.needsAckReconnect = false;
         this.pollThread = new Thread(() -> runPollLoop(myGeneration), "Redis Listen: " + queueKey);
         this.pollThread.setDaemon(true);
         this.pollThread.start();
@@ -250,6 +279,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 Thread.currentThread().interrupt();
             }
             workerPool = null;
+            // Nulled alongside the pool purely for teardown symmetry / GC hygiene -- nothing reads
+            // it after stop() completes (a stale-generation poll thread holds its own captured
+            // reference by design), but leaving one of the pair dangling reads as an oversight.
+            executionPermits = null;
         }
         if (pollConnection != null) {
             pollConnection.close();
@@ -269,7 +302,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * <p>The base budget covers the Redis-side blocking call ({@code blpop}/{@code xreadGroup}),
      * sized from {@code pollBlockSeconds} with a floor of 10s and a 5s safety margin. The main
      * read loop's message dispatch now runs on {@link #workerPool} rather than this thread (see
-     * {@link #computeWorkerDrainTimeoutMs()}) -- but {@link #runReclaimSweep()} still calls
+     * {@link #computeWorkerDrainTimeoutMs()}) -- but {@link #runReclaimSweep(Semaphore)} still calls
      * {@link #submitStreamMessage(RedisStreamMessage)} SYNCHRONOUSLY on the poll thread for
      * redelivered entries under the delivery-attempt limit, and that method's
      * {@code future.get(ackWaitTimeoutMs, ...)} bound applies regardless of which thread calls
@@ -301,7 +334,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * The main read loop's dispatched workers (see {@link #dispatchStreamMessage}) can be parked
      * in {@code submitStreamMessage()}'s bounded {@code future.get(ackWaitTimeoutMs, ...)} call --
      * this budget covers that ASYNC, pool-dispatched wait, which is a separate call site from the
-     * poll thread's own SYNCHRONOUS call to the same method via {@link #runReclaimSweep()} (still
+     * poll thread's own SYNCHRONOUS call to the same method via {@link #runReclaimSweep(Semaphore)} (still
      * covered by {@link #computeJoinTimeoutMs()}). Since workers run in parallel, this bound does
      * not need to grow with {@link #concurrentExecutions} -- every worker is independently bounded
      * by the same {@code ackWaitTimeoutMs}, so the slowest one still finishes within one such
@@ -449,13 +482,27 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             return;
         }
 
-        if (stopping.get()) {
-            fresh.close();
-            return;
-        }
+        // The stopping re-check happens INSIDE the same synchronized block that publishes, not
+        // before it. stop() sets `stopping` before taking ackConnectionLock, so checking under the
+        // lock is airtight: if stop()'s own "close and null ackConnection" block slipped in between
+        // an outside check and this publish, stop() would have seen null (closing nothing) and this
+        // method would then have published the fresh connection anyway -- leaking a live socket and,
+        // on the pooled path, permanently pinning a reference the evictor can never reclaim.
+        boolean discard;
         synchronized (ackConnectionLock) {
-            ackConnection = fresh;
-            needsAckReconnect = false;
+            discard = stopping.get();
+            if (!discard) {
+                ackConnection = fresh;
+                needsAckReconnect = false;
+                // Mirror the poll thread's own recovery pattern in runPollLoop(): a successful
+                // rebuild clears the ack-failure streak and reports the listener healthy again,
+                // undoing reportAckConnectionBroken()'s OFFLINE update.
+                consecutiveAckFailures = 0;
+                updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.ONLINE, null);
+            }
+        }
+        if (discard) {
+            fresh.close();
         }
     }
 
@@ -548,6 +595,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             pool.submit(() -> {
                 try {
                     listener.submit(PayloadUtil.toPayload(toJson(queueKey, value)));
+                } catch (RuntimeException e) {
+                    // submit(Runnable) discards the returned Future, so an exception escaping this
+                    // lambda would be captured by the FutureTask and vanish entirely -- no log, no
+                    // status update, nothing. Log it here instead of letting it disappear.
+                    logger.log(Level.SEVERE, "Unexpected error processing a popped value from " + queueKey
+                            + "; the value has already been removed from Redis and is lost (List mode has no "
+                            + "ack/redelivery).", e);
                 } finally {
                     permits.release();
                 }
@@ -598,6 +652,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         if (messages.isEmpty()) {
             permits.release();
         } else {
+            // Exactly ONE permit was acquired above, and each dispatched worker releases exactly
+            // one in its finally block -- so this loop is only balanced because xreadGroup() is
+            // always called with count=1 (see the call above) and `messages` therefore never holds
+            // more than one entry. If that hardcoded 1 is ever raised, N releases against 1
+            // acquired permit would permanently inflate the semaphore's permit count and silently
+            // remove the concurrency bound for the life of this listener: acquire one permit per
+            // MESSAGE (not per read call) if the count ever changes.
             for (RedisStreamMessage message : messages) {
                 dispatchStreamMessage(message, pool, permits);
             }
@@ -605,11 +666,11 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
         long now = System.currentTimeMillis();
         if (now - lastReclaimSweepAt >= idleReclaimTimeoutMs) {
-            // Unchanged from before Task 3: the reclaim sweep runs synchronously on the poll thread,
-            // not dispatched to the worker pool, and its own submitStreamMessage() calls (for
-            // redelivered entries under the attempt limit) do not interact with executionPermits --
-            // that accounting only governs the main read-loop's dispatch path above.
-            runReclaimSweep();
+            // The reclaim sweep runs synchronously on the poll thread, not dispatched to the worker
+            // pool -- but its redelivery path is still bounded by the SAME semaphore, so a
+            // redelivery can never run as an extra concurrent execution beyond the configured
+            // limit (see runReclaimSweep()).
+            runReclaimSweep(permits);
             lastReclaimSweepAt = now;
         }
     }
@@ -629,6 +690,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             pool.submit(() -> {
                 try {
                     submitStreamMessage(message);
+                } catch (RuntimeException e) {
+                    // submit(Runnable) discards the returned Future, so an exception escaping this
+                    // lambda would be captured by the FutureTask and vanish entirely -- no log, no
+                    // status update, nothing. Log it here instead of letting it disappear.
+                    logger.log(Level.SEVERE, "Unexpected error processing stream message " + message.getId()
+                            + " on " + queueKey + "; the message remains unacknowledged and is eligible for "
+                            + "reclaim.", e);
                 } finally {
                     permits.release();
                 }
@@ -659,12 +727,23 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * is signaled, the loop below checks it at the top of every iteration and bails before
      * starting a new entry. That bounds the sweep's remaining blocking time to at most one more
      * in-flight {@code xclaim}/{@code future.get()}, which the existing join budget already
-     * covers. Every {@code redisConnection} access below is additionally taken through a local
-     * snapshot with a null-guard, matching the pattern in {@link #submitStreamMessage}, since
-     * {@code stop()} can still race ahead and tear down the connection while this method is
-     * mid-iteration.
+     * covers. Connection teardown by a concurrent {@code stop()} is guarded on both sides: the
+     * {@link #pollConnection} used for the {@code xpendingIdle} read is taken through a local
+     * snapshot with a null-guard below, and every {@link #ackConnection} command goes through
+     * {@link #claimQuietly}/{@link #deadLetterQuietly}/{@link #ackQuietly}, which hold
+     * {@link #ackConnectionLock} and null-guard the connection internally.
+     *
+     * <p><b>Why this takes the {@link Semaphore}:</b> the redelivery branch below calls
+     * {@link #submitStreamMessage(RedisStreamMessage)}, which triggers a real Boomi process
+     * execution -- so it must count against the same {@link #concurrentExecutions} budget as the
+     * main read loop's dispatched workers. Without that, a listener configured for exactly one
+     * concurrent execution could run a worker and a redelivery simultaneously. A permit is taken
+     * with the non-blocking {@code tryAcquire()} rather than {@code acquire()}: this runs on the
+     * poll thread, and a blocking wait here would park that thread for longer than
+     * {@link #computeJoinTimeoutMs()}'s {@code stop()} budget accounts for. When no slot is free
+     * the entry is simply left pending for a future sweep.
      */
-    private void runReclaimSweep() {
+    private void runReclaimSweep(Semaphore permits) {
         RedisConnection poll = pollConnection;
         if (poll == null) {
             logger.warning("Skipping reclaim sweep for " + queueKey + ": the Redis connection was "
@@ -695,9 +774,18 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 deadLetterQuietly(claimed);
                 logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
                         + " after " + deliveryCountAfterClaim + " delivery attempts.");
-            } else {
-                submitStreamMessage(claimed);
+            } else if (permits.tryAcquire()) {
+                try {
+                    submitStreamMessage(claimed);
+                } finally {
+                    permits.release();
+                }
             }
+            // else: no execution slot currently free -- leave this entry pending; it will be
+            // picked up again on a future sweep once a slot opens up. Using tryAcquire() (not the
+            // blocking acquire()) here is deliberate: this runs on the poll thread itself, and a
+            // blocking wait here would extend how long the poll thread can be parked well beyond
+            // what stop()'s join-timeout budget accounts for.
         }
     }
 
@@ -716,16 +804,20 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * use the bounded {@code future.get(timeout, unit)} overload instead, bounded by the existing
      * "Idle Reclaim Timeout" operation property (falls back to {@link #DEFAULT_ACK_WAIT_TIMEOUT_MS}):
      * waiting past that point buys nothing, since the still-unacked message becomes eligible for
-     * Task 8's reclaim sweep at that same threshold regardless.
+     * {@link #runReclaimSweep(Semaphore)} at that same threshold regardless.
      *
-     * <p><b>Interaction with {@code stop()}'s join timeout:</b> {@link #computeJoinTimeoutMs()}
-     * extends {@code stop()}'s {@code pollThread.join(...)} budget to also cover this bounded wait
-     * when Stream mode + ack-on-completion is active, so {@code stop()} does not race ahead and
-     * tear down {@code redisConnection} while this thread is still parked here under normal
-     * timing. As defense in depth for the case where {@code stop()} is invoked with an
-     * even-slower-than-expected process (or is itself given a shorter-than-expected caller-side
-     * deadline), the success branch below null-checks {@code redisConnection} before calling
-     * {@code xack} rather than assuming it is still present -- see the guard below.
+     * <p><b>Interaction with {@code stop()}'s timeout budgets:</b> this method has two call sites,
+     * each covered by a different budget. Dispatched ASYNCHRONOUSLY onto {@link #workerPool} by
+     * {@link #dispatchStreamMessage} (the main read loop's path), the bounded wait below is covered
+     * by {@link #computeWorkerDrainTimeoutMs()}, which bounds {@code stop()}'s
+     * {@code workerPool.awaitTermination(...)}. Called SYNCHRONOUSLY on the poll thread by
+     * {@link #runReclaimSweep(Semaphore)} (the redelivery path), it is covered instead by
+     * {@link #computeJoinTimeoutMs()}, which bounds {@code stop()}'s {@code pollThread.join(...)}.
+     * Both budgets are capped, so neither guarantees this wait finishes before {@code stop()}
+     * proceeds to tear down connections. As defense in depth, the success branch's ack goes through
+     * {@link #ackQuietly}, which takes {@link #ackConnectionLock}, snapshots {@link #ackConnection}
+     * and warns-and-skips if it is already {@code null} -- so a message racing a concurrent
+     * {@code stop()} is simply left unacknowledged for reclaim rather than raw-NPEing.
      */
     void submitStreamMessage(RedisStreamMessage message) {
         String json = toJson(message.getId(), message.getValue());
@@ -758,9 +850,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
     /**
      * Acknowledges one Stream message under {@link #ackConnectionLock}. A single Jedis connection
-     * is not thread-safe, and once Task 3 introduces a worker pool, multiple workers can reach this
-     * call concurrently -- the lock serializes every {@code ackConnection} command so no two
-     * commands are ever in flight on the same socket at once.
+     * is not thread-safe, and up to {@link #concurrentExecutions} workers from {@link #workerPool}
+     * can reach this call concurrently -- the lock serializes every {@code ackConnection} command
+     * so no two commands are ever in flight on the same socket at once.
      */
     private void ackQuietly(String messageId) {
         synchronized (ackConnectionLock) {
@@ -774,16 +866,38 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 connection.xack(queueKey, consumerGroupName, messageId);
             } catch (JedisConnectionException e) {
-                needsAckReconnect = true;
-                logger.log(Level.WARNING, "Ack connection broke while acknowledging stream message "
-                        + messageId + " on " + queueKey + "; a reconnect will be attempted on the "
-                        + "next poll iteration.", e);
+                reportAckConnectionBroken("while acknowledging stream message " + messageId, e);
             }
         }
     }
 
     /**
-     * Claims one idle-pending Stream entry during {@link #runReclaimSweep()}. Guarded the same way
+     * Records one ack-connection break, called from inside {@code synchronized (ackConnectionLock)}
+     * by {@link #ackQuietly}, {@link #claimQuietly}, and {@link #deadLetterQuietly}. Mirrors
+     * {@link #runPollLoop}'s own failure-throttling shape for the poll connection ({@link
+     * #shouldLogFailure}/{@link #FAILURE_LOG_THROTTLE_MS}) but with independent counters, since ack
+     * failures can originate concurrently from multiple worker threads holding this same lock in
+     * sequence, on a completely separate timeline from the poll thread's own failure counting.
+     *
+     * <p>Reporting OFFLINE matters as much as the throttling: before this existed, a broken ack
+     * connection was handled entirely inside the three catch blocks, so the Boomi UI could show a
+     * listener as perfectly healthy while every single ack silently failed.
+     */
+    private void reportAckConnectionBroken(String contextDescription, JedisConnectionException e) {
+        needsAckReconnect = true;
+        consecutiveAckFailures++;
+        long now = System.currentTimeMillis();
+        if (shouldLogFailure(consecutiveAckFailures, now, lastLoggedAckFailureAtMillis)) {
+            logger.log(Level.WARNING, "Ack connection broke " + contextDescription + " on " + queueKey
+                    + "; a reconnect will be attempted on the next poll iteration.", e);
+            lastLoggedAckFailureAtMillis = now;
+        }
+        updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE,
+                "Ack connection broke on " + queueKey + ": " + e.getMessage());
+    }
+
+    /**
+     * Claims one idle-pending Stream entry during {@link #runReclaimSweep(Semaphore)}. Guarded the same way
      * as {@link #ackQuietly}: a {@link JedisConnectionException} here means the ack connection --
      * not the poll connection driving the sweep -- has broken, so it only sets
      * {@link #needsAckReconnect} rather than reconnecting inline (only the poll thread reconnects;
@@ -802,10 +916,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             try {
                 return connection.xclaim(queueKey, consumerGroupName, consumerName, messageId);
             } catch (JedisConnectionException e) {
-                needsAckReconnect = true;
-                logger.log(Level.WARNING, "Ack connection broke while claiming pending stream message "
-                        + messageId + " on " + queueKey + "; a reconnect will be attempted on the "
-                        + "next poll iteration.", e);
+                reportAckConnectionBroken("while claiming pending stream message " + messageId, e);
                 return null;
             }
         }
@@ -813,7 +924,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
     /**
      * Moves one over-limit claimed message to the dead-letter stream and acks it off the original
-     * pending list, during {@link #runReclaimSweep()}. Same ack-connection guard discipline as
+     * pending list, during {@link #runReclaimSweep(Semaphore)}. Same ack-connection guard discipline as
      * {@link #claimQuietly}.
      */
     private void deadLetterQuietly(RedisStreamMessage claimed) {
@@ -829,10 +940,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 connection.xadd(deadLetterKey, claimed.getValue());
                 connection.xack(queueKey, consumerGroupName, claimed.getId());
             } catch (JedisConnectionException e) {
-                needsAckReconnect = true;
-                logger.log(Level.WARNING, "Ack connection broke while dead-lettering stream message "
-                        + claimed.getId() + " on " + queueKey + "; a reconnect will be attempted on "
-                        + "the next poll iteration.", e);
+                reportAckConnectionBroken("while dead-lettering stream message " + claimed.getId(), e);
             }
         }
     }

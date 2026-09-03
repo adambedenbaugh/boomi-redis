@@ -581,6 +581,97 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void concurrentExecutionsAboveTheSupportedCeilingThrowsADescriptiveConnectorException() {
+        // An absurd configured value used to be silently narrowed by the long-to-int cast: either
+        // to a non-positive number (a bare IllegalArgumentException out of newFixedThreadPool) or
+        // to some large positive number (an effectively unbounded thread pool). Neither is a
+        // descriptive ConnectorException, which this project requires at every boundary.
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(5_000_000_000L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        try {
+            new RedisListenOperation(ctx);
+            fail("an out-of-range \"Concurrent Executions\" must be rejected at construction");
+        } catch (ConnectorException e) {
+            assertTrue("the message must name the offending field so an operator knows what to fix "
+                    + "-- was: " + e.getMessage(), e.getMessage().contains("Concurrent Executions"));
+            assertTrue("the message must state the supported maximum -- was: " + e.getMessage(),
+                    e.getMessage().contains("100"));
+        }
+    }
+
+    @Test
+    public void concurrentExecutionsAtTheSupportedCeilingIsAccepted() {
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(100L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        assertEquals("the ceiling itself must be an accepted value, not rejected off-by-one",
+                100, new RedisListenOperation(ctx).getConcurrentExecutionsForTest());
+    }
+
+    @Test(timeout = 20000)
+    public void restartResetsNeedsAckReconnectSoTheFreshAckConnectionIsNotImmediatelyTornDown()
+            throws Exception {
+        // needsAckReconnect used to survive a stop()/start() cycle: start() built a brand-new,
+        // healthy ackConnection, but the stale flag made the new poll thread's very first
+        // iteration immediately tear it down and rebuild it -- dropping any ack racing that
+        // window.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage m1 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("21-1", "v1");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> {
+                    if (context.getCount() == 2) {
+                        // The first cycle's ack connection breaks, setting needsAckReconnect. The
+                        // poll thread's reconnect attempt then constructs a REAL (unmocked)
+                        // RedisConnection whose init() genuinely fails against this test's
+                        // property-less context, so the flag is never cleared -- exactly the state
+                        // the operator would stop() the listener in.
+                        doThrow(new JedisConnectionException("Broken pipe (Write failed)"))
+                                .when(mock).xack(eq("s"), eq("mygroup"), eq("21-1"));
+                    }
+                    when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                            .thenReturn(java.util.Collections.singletonList(m1))
+                            .thenReturn(java.util.Collections.emptyList());
+                })) {
+            op.start(listener, new RedisListenManager());
+            long deadline = System.currentTimeMillis() + 10_000L;
+            while (!op.getNeedsAckReconnectForTest() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50L);
+            }
+            op.stop();
+
+            assertTrue("premise: the flag must be left set by the first cycle's unrecoverable ack "
+                    + "break, otherwise this test proves nothing about the restart reset",
+                    op.getNeedsAckReconnectForTest());
+
+            op.start(listener, new RedisListenManager());
+            try {
+                assertFalse("start() must clear needsAckReconnect -- the ackConnection it just "
+                        + "built is healthy by construction", op.getNeedsAckReconnectForTest());
+            } finally {
+                op.stop();
+            }
+        }
+    }
+
+    @Test
     public void workerDrainTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
         RedisListenOperation op = new RedisListenOperation(streamContext("OnCompletion", 300_000L));
         assertEquals(30_000L, op.computeWorkerDrainTimeoutMsForTest());
@@ -1155,6 +1246,138 @@ public class RedisListenOperationTest {
             // given this design (the flag is a next-iteration signal, not a mid-iteration interrupt),
             // not a bug -- what matters, and what's verified above/below, is that the break is
             // detected and a reconnect is genuinely attempted, and that the process never crashes.
+        } finally {
+            julLogger.removeHandler(captor);
+        }
+    }
+
+    @Test(timeout = 40000)
+    public void reclaimSweepRedeliveryIsBoundedByTheSameExecutionPermitsAsDispatchedWorkers()
+            throws Exception {
+        // runReclaimSweep() runs synchronously on the poll thread, so its redelivery call to
+        // submitStreamMessage() used to bypass executionPermits entirely -- meaning that at the
+        // default concurrent_executions=1 a worker could be mid-execution on message A while the
+        // poll thread simultaneously ran message B's redelivery: two concurrent Boomi process
+        // executions on a listener configured for exactly one. The redelivery path must take a
+        // permit too (non-blocking, so it never parks the poll thread past stop()'s join budget)
+        // and leave the entry pending when no slot is free.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        assertEquals("this test's premise is the DEFAULT sequential configuration", 1,
+                op.getConcurrentExecutionsForTest());
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        // The message the (sole) worker is busy with -- it holds the only permit until released.
+        com.boomi.connector.redis.connection.RedisStreamMessage inFlight =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("20-1", "busy");
+        // An idle pending entry, well under max_delivery_attempts (3 via streamContext), so the
+        // sweep's redelivery branch -- not its dead-letter branch -- is the one under test.
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("20-9", 1L);
+        com.boomi.connector.redis.connection.RedisStreamMessage reclaimed =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("20-9", "stale");
+
+        java.util.concurrent.CountDownLatch workerGate = new java.util.concurrent.CountDownLatch(1);
+        AtomicInteger submitCount = new AtomicInteger(0);
+        doAnswer(invocation -> {
+            if (submitCount.incrementAndGet() == 1) {
+                // Mimic a slow in-flight Boomi process execution holding the sole permit.
+                workerGate.await(20, TimeUnit.SECONDS);
+            }
+            return null;
+        }).when(listener).submit(any(com.boomi.connector.api.Payload.class));
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(inFlight))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(pending));
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("20-9"))).thenReturn(reclaimed);
+        })) {
+            op.start(listener, new RedisListenManager());
+            // Long enough for the poll thread to read 20-1, dispatch it (consuming the sole
+            // permit), and run a full reclaim sweep that reaches its redelivery decision.
+            Thread.sleep(1000L);
+
+            RedisConnection ackConnection = mocked.constructed().get(1);
+            // Proves the sweep genuinely ran and reached its redelivery decision point -- without
+            // this, the assertion below would also pass if no sweep had happened at all.
+            verify(ackConnection, atLeastOnce()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("20-9"));
+            assertEquals("while the sole execution permit is held by an in-flight worker, the "
+                    + "reclaim sweep must NOT run a redelivery -- only the worker's own submission "
+                    + "may be in flight", 1, submitCount.get());
+
+            // Release the worker: it returns its permit, so a later sweep may now redeliver.
+            workerGate.countDown();
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (submitCount.get() < 2 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50L);
+            }
+            assertTrue("once the worker releases the permit, a subsequent sweep must redeliver the "
+                    + "still-pending entry -- observed submissions: " + submitCount.get(),
+                    submitCount.get() >= 2);
+
+            op.stop();
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void unexpectedWorkerExceptionIsLoggedRatherThanSwallowedByTheDiscardedFuture() throws Exception {
+        // dispatchStreamMessage() binds submit(Runnable) and discards the returned Future, so any
+        // RuntimeException escaping the worker lambda would be captured by the FutureTask and
+        // vanish completely -- no log, no status update, nothing. The worker body must therefore
+        // catch and log it itself. A plain RuntimeException (deliberately NOT the
+        // JedisConnectionException that ackQuietly/claimQuietly/deadLetterQuietly already handle)
+        // is the exact shape that used to disappear.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        doThrow(new RuntimeException("boom from the Boomi submission path"))
+                .when(listener).submit(any(com.boomi.connector.api.Payload.class));
+
+        com.boomi.connector.redis.connection.RedisStreamMessage message =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("11-1", "v");
+
+        Logger julLogger = Logger.getLogger(RedisListenOperation.class.getName());
+        List<LogRecord> workerFailureRecords = new CopyOnWriteArrayList<>();
+        Handler captor = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                String message = record.getMessage();
+                if (record.getLevel() == Level.SEVERE && message != null
+                        && message.contains("Unexpected error processing stream message 11-1")) {
+                    workerFailureRecords.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        julLogger.addHandler(captor);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                        .thenReturn(java.util.Collections.singletonList(message))
+                        .thenReturn(java.util.Collections.emptyList()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(500L);
+            op.stop();
+
+            assertFalse("an unexpected RuntimeException thrown inside a dispatched worker must be "
+                    + "logged at SEVERE with its cause, not silently swallowed by the discarded Future",
+                    workerFailureRecords.isEmpty());
+            assertNotNull("the log record must carry the original exception as its cause",
+                    workerFailureRecords.get(0).getThrown());
+            // The permit must still have been released in the finally block, so the poll thread
+            // kept looping and read again rather than deadlocking on a leaked permit.
+            verify(mocked.constructed().get(0), atLeast(2))
+                    .xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt());
         } finally {
             julLogger.removeHandler(captor);
         }
