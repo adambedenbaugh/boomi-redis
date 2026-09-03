@@ -24,6 +24,12 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   entry per 5 minutes (previously logged unconditionally every 5-second retry, which could fill
   the container log at scale — one production incident logged ~4800 identical stack traces over
   ~7 hours before a manual listener restart).
+- Listen's Stream reclaim sweep now dead-letters a message on the correct delivery attempt.
+  `Max Delivery Attempts = 5` previously allowed 6 deliveries before dead-lettering, because the
+  guard compared against the delivery count read from `XPENDING` *before* the sweep's `XCLAIM`
+  call — but `XCLAIM` increments Redis's delivery counter as a side effect of claiming, so that
+  pre-claim count was always one lower than the count that actually governed the delivery about
+  to happen.
 
 ## [1.2.0] - 2026-08-14
 

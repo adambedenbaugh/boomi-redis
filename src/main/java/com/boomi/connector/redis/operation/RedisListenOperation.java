@@ -465,7 +465,12 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 continue;
             }
 
-            if (p.getDeliveryCount() > maxDeliveryAttempts) {
+            // XCLAIM increments Redis's delivery counter as a side effect of claiming, so the
+            // count that governs THIS delivery is p.getDeliveryCount() + 1 (the pre-claim value
+            // read from XPENDING above), not the pre-claim value itself -- comparing against the
+            // stale pre-claim count let one extra delivery through past max_delivery_attempts.
+            long deliveryCountAfterClaim = p.getDeliveryCount() + 1;
+            if (deliveryCountAfterClaim > maxDeliveryAttempts) {
                 connection = redisConnection;
                 if (connection == null) {
                     logger.warning("Cannot dead-letter stream message " + claimed.getId() + " from "
@@ -476,7 +481,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 connection.xadd(deadLetterKey, claimed.getValue());
                 connection.xack(queueKey, consumerGroupName, claimed.getId());
                 logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
-                        + " after " + p.getDeliveryCount() + " delivery attempts.");
+                        + " after " + deliveryCountAfterClaim + " delivery attempts.");
             } else {
                 submitStreamMessage(claimed);
             }

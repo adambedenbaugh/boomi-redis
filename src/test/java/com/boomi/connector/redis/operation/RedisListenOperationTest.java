@@ -636,6 +636,40 @@ public class RedisListenOperationTest {
         }
     }
 
+    @Test
+    public void reclaimSweepDeadLettersMessageWhenClaimReachesMaxAttempts() throws Exception {
+        // Regression test for the off-by-one in runReclaimSweep()'s dead-letter guard: XPENDING's
+        // delivery count reflects deliveries BEFORE this sweep's XCLAIM call, but XCLAIM increments
+        // the real delivery count as a side effect of claiming. With max_delivery_attempts=3 (see
+        // streamContext), a message already delivered 3 times (pending.getDeliveryCount() == 3) is
+        // about to become its 4th delivery once claimed here -- over the limit -- so it must be
+        // dead-lettered on THIS sweep, not resubmitted for a 4th attempt.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("6-1", 3L);
+        com.boomi.connector.redis.connection.RedisStreamMessage claimed =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("6-1", "v");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(pending));
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("6-1"))).thenReturn(claimed);
+        })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(200);
+            op.stop();
+
+            verify(mocked.constructed().get(0), atLeastOnce()).xadd(eq("s:dead-letter"), eq("v"));
+            verify(mocked.constructed().get(0), atLeastOnce()).xack("s", "mygroup", "6-1");
+            verify(listener, never()).submit(any(com.boomi.connector.api.Payload.class));
+        }
+    }
+
     @Test(timeout = 15000)
     public void reclaimSweepStopsProcessingRemainingEntriesOnceStoppingIsSignaled() throws Exception {
         // Regression test for the Critical review finding: runReclaimSweep()'s for-loop had no
