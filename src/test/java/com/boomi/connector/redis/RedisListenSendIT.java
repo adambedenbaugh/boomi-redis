@@ -276,6 +276,77 @@ public class RedisListenSendIT {
     }
 
     @Test
+    public void ackConnectionSelfHealsAfterItsConnectionIsForciblyKilled() throws Exception {
+        // The ack-connection analog of listenerReconnectsAfterItsConnectionIsForciblyKilled above:
+        // ackConnection can break independently of pollConnection (e.g. a worker's xack hits a dead
+        // socket while the poll connection is still healthy). CLIENT KILL TYPE normal severs EVERY
+        // client connection server-side, so it breaks both the poll and ack connections at once here
+        // -- proving self-healing requires the message sent afterward to be both delivered (poll
+        // connection healed) AND fully acknowledged (ack connection healed too), with no manual
+        // intervention. A short idle_reclaim_timeout_ms ensures that even if the very first
+        // post-kill ack attempt loses the race against reconnectAckQuietly() and is dropped, the
+        // idle-reclaim sweep picks the still-pending message back up and re-submits/re-acks it once
+        // the ack connection is back.
+        String queueKey = "it-ack-selfheal-" + System.nanoTime();
+        String group = "it-ack-selfheal-group-" + System.nanoTime();
+        long idleReclaimTimeoutMs = 3000L;
+
+        OperationContext ctx = listenContext("Stream", queueKey, group, "OnCompletion",
+                idleReclaimTimeoutMs, 5L, 1000L);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        ListenerExecutionResult success = mock(ListenerExecutionResult.class);
+        when(success.isSuccess()).thenReturn(true);
+        when(listener.submit(any(Payload.class), any(SubmitOptions.class))).thenAnswer(invocation -> {
+            Payload payload = invocation.getArgument(0);
+            received.add(readPayload(payload));
+            return CompletableFuture.completedFuture(success);
+        });
+
+        op.start(listener, new RedisListenManager());
+        try {
+            // Let the listener settle into its XREADGROUP loop, then sever every client connection
+            // server-side -- both the poll and ack connections are "normal" clients.
+            Thread.sleep(500);
+            org.testcontainers.containers.Container.ExecResult killResult =
+                    REDIS.execInContainer("redis-cli", "CLIENT", "KILL", "TYPE", "normal");
+            assertEquals("redis-cli CLIENT KILL failed: " + killResult.getStderr(), 0, killResult.getExitCode());
+
+            try (Jedis direct = directClient()) {
+                direct.xadd(queueKey, StreamEntryID.NEW_ENTRY,
+                        Collections.singletonMap("value", "hello-after-kill"));
+
+                long deliveredDeadline = System.currentTimeMillis() + 20_000L;
+                while (received.isEmpty() && System.currentTimeMillis() < deliveredDeadline) {
+                    TimeUnit.MILLISECONDS.sleep(200);
+                }
+                assertFalse("Expected the listener to self-heal its poll connection and still "
+                        + "deliver a message sent after the kill", received.isEmpty());
+                assertTrue("Expected the delivered payload to contain the post-kill value; got: "
+                        + received.get(0), received.get(0).contains("hello-after-kill"));
+
+                // Full acknowledgment can only happen once the ack connection has been rebuilt (it
+                // was killed too) -- either directly via the worker's own xack, or via the
+                // idle-reclaim sweep re-claiming and re-submitting the message after
+                // idle_reclaim_timeout_ms if the first attempt raced a still-broken ack connection.
+                long ackDeadline = System.currentTimeMillis() + 30_000L;
+                long pendingTotal = direct.xpending(queueKey, group).getTotal();
+                while (pendingTotal > 0 && System.currentTimeMillis() < ackDeadline) {
+                    TimeUnit.MILLISECONDS.sleep(300);
+                    pendingTotal = direct.xpending(queueKey, group).getTotal();
+                }
+                assertEquals("Expected the stream message to be fully acknowledged once the ack "
+                        + "connection self-heals", 0L, direct.xpending(queueKey, group).getTotal());
+            }
+        } finally {
+            op.stop();
+        }
+    }
+
+    @Test
     public void deadLettersAfterMaxDeliveryAttempts() throws Exception {
         String queueKey = "it-dlq-" + System.nanoTime();
         String group = "it-dlq-group-" + System.nanoTime();

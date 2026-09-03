@@ -418,6 +418,13 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
      * {@link #ackConnection} at once. Mirrors {@link #reconnectPollQuietly()}'s own discipline:
      * build into a local first, only publish on full success, and re-check {@link #stopping} before
      * publishing so a slow reconnect that outlasts a concurrent {@code stop()} never leaks it.
+     *
+     * <p>Publishing the fresh connection and clearing {@link #needsAckReconnect} happen inside the
+     * SAME {@code synchronized} block: a worker could otherwise observe the freshly-published
+     * connection, hit a genuine new failure, and set the flag again -- only for this method's
+     * still-in-flight clear (running just after publish but before the flag write) to immediately
+     * overwrite that fresh signal. Not a correctness gap either way (the next failure re-sets it),
+     * but keeping both writes atomic avoids the avoidable race entirely.
      */
     private void reconnectAckQuietly() {
         RedisConnection old;
@@ -448,8 +455,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         }
         synchronized (ackConnectionLock) {
             ackConnection = fresh;
+            needsAckReconnect = false;
         }
-        needsAckReconnect = false;
     }
 
     /**
@@ -788,6 +795,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         synchronized (ackConnectionLock) {
             RedisConnection connection = ackConnection;
             if (connection == null) {
+                logger.warning("Cannot claim pending stream message " + messageId + " from " + queueKey
+                        + ": the ack connection was already closed by stop() or is being reconnected.");
                 return null;
             }
             try {
