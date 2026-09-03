@@ -277,8 +277,11 @@
 	    <field id="concurrent_executions" label="Concurrent Executions" type="integer">
 	        <helpText>Maximum number of Boomi process executions this listener may have in flight at
 	            once. Redis reads still happen one at a time on a single poll loop; this setting only
-	            bounds how many already-read messages may be submitted to Boomi concurrently. Defaults
-	            to 1, which reproduces the previous strictly sequential behavior.</helpText>
+	            bounds how many already-read messages may be submitted to Boomi concurrently. Raising
+	            this above 1 means List-mode messages may finish processing out of the order they were
+	            read, even though BLPOP still reads them in FIFO order. Defaults to 1, which reproduces
+	            the previous strictly sequential behavior; the maximum supported value is 100, since
+	            each concurrent execution occupies its own worker thread on the Atom.</helpText>
 	        <defaultValue>1</defaultValue>
 	    </field>
 	</operation>

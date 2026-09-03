@@ -151,8 +151,11 @@ Default is empty.
 **Concurrent Executions** — Maximum number of Boomi process executions this
 listener may have in flight at once. Redis reads still happen one at a time on
 a single poll loop; this setting only bounds how many already-read messages
-may be submitted to Boomi concurrently. Default is `1` (fully sequential,
-matching prior behavior).
+may be submitted to Boomi concurrently. Raising this above `1` means List-mode
+messages may finish processing out of the order they were read, even though
+BLPOP still reads them in FIFO order. Default is `1` (fully sequential,
+matching prior behavior); the maximum supported value is `100`, since each
+concurrent execution occupies its own worker thread on the Atom.
 
 > **Attention:** On a pooled connection, a Listen operation borrows one connection
 > from the shared pool for polling and holds it for essentially the entire time it

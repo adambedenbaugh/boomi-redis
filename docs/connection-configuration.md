@@ -73,12 +73,16 @@ this duration. Applies only when pooling is enabled. Default is `60`.
 from the pool before failing. Applies only when pooling is enabled. Default is
 `5`.
 
-> **Attention:** A pooled Listen operation holds one connection from the shared
-> pool for essentially the entire time it is running — a blocking poll
+> **Attention:** A pooled Listen operation holds at least one connection from the
+> shared pool for essentially the entire time it is running — a blocking poll
 > borrows-and-holds a connection for the configured Poll Block duration, then
-> immediately borrows again for the next iteration. When sizing **Maximum
-> Connections**, account for the number of concurrent Listen operations sharing
-> this connection in addition to normal GET/UPSERT/DELETE/Send traffic.
+> immediately borrows again for the next iteration. A Stream-mode Listen
+> operation borrows a **second** pooled connection dedicated to acknowledgements,
+> held for its entire run as well — List mode borrows only the one. When sizing
+> **Maximum Connections**, account for (1 or 2, per Listen operation, depending
+> on Queue Type) times the number of concurrent Listen operations sharing this
+> connection, in addition to normal GET/UPSERT/DELETE/Send traffic. This count
+> does not grow with a Listen operation's **Concurrent Executions** setting.
 
 > **Note:** The pooling fields above also apply to **OSS Cluster** connections, not
 > just **Single Endpoint**. `JedisCluster` always maintains its own internal
