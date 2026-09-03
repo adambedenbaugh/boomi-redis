@@ -98,6 +98,13 @@ public class RedisListenSendIT {
      */
     private OperationContext listenContext(String queueType, String queueKey, String consumerGroupName,
             String ackMode, long idleReclaimTimeoutMs, long maxDeliveryAttempts, long pollBlockMs) {
+        return listenContext(queueType, queueKey, consumerGroupName, ackMode, idleReclaimTimeoutMs,
+                maxDeliveryAttempts, pollBlockMs, 1L);
+    }
+
+    private OperationContext listenContext(String queueType, String queueKey, String consumerGroupName,
+            String ackMode, long idleReclaimTimeoutMs, long maxDeliveryAttempts, long pollBlockMs,
+            long concurrentExecutions) {
         Map<String, Object> connProps = new HashMap<>();
         connProps.put("hosts", hostPort);
         connProps.put("authenticationType", "None");
@@ -120,6 +127,7 @@ public class RedisListenSendIT {
         }
         opProps.put("idle_reclaim_timeout_ms", idleReclaimTimeoutMs);
         opProps.put("max_delivery_attempts", maxDeliveryAttempts);
+        opProps.put("concurrent_executions", concurrentExecutions);
 
         return new SimpleOperationContext(null, null, OperationType.LISTEN, connProps, opProps, "listen", null);
     }
@@ -397,6 +405,150 @@ public class RedisListenSendIT {
                     0L, direct.xpending(queueKey, group).getTotal());
         } finally {
             op.stop();
+        }
+    }
+
+    @Test
+    public void concurrentExecutionsAllowsOverlappingExecutionsInListMode() throws Exception {
+        String queueKey = "it-concurrency-list-" + System.nanoTime();
+        int messageCount = 6;
+        int concurrentExecutions = 3;
+        try (Jedis direct = directClient()) {
+            for (int i = 0; i < messageCount; i++) {
+                direct.rpush(queueKey, "msg-" + i);
+            }
+        }
+
+        OperationContext ctx = listenContext("List", queueKey, null, null, 60_000L, 5L, 500L,
+                concurrentExecutions);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Payload payload = invocation.getArgument(0);
+            Thread.sleep(1000L);
+            received.add(readPayload(payload));
+            return null;
+        }).when(listener).submit(any(Payload.class));
+
+        long startedAt = System.currentTimeMillis();
+        op.start(listener, new RedisListenManager());
+        try {
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (received.size() < messageCount && System.currentTimeMillis() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(100);
+            }
+        } finally {
+            op.stop();
+        }
+        long elapsedMs = System.currentTimeMillis() - startedAt;
+
+        assertEquals("Expected all pushed messages to be delivered", messageCount, received.size());
+        // Sequential (concurrency=1) would take >= 6 * 1000ms = 6000ms. With 3-way concurrency, 6
+        // messages each taking 1000ms complete in 2 batches. Generous ceiling still clearly
+        // distinguishes "ran concurrently" from "ran sequentially" without being flaky on a loaded
+        // CI box.
+        assertTrue("Expected overlapping execution to finish well under the fully-sequential bound "
+                + "of 6000ms -- elapsed=" + elapsedMs + "ms", elapsedMs < 5000L);
+    }
+
+    @Test
+    public void concurrentExecutionsPreservesAckOnCompletionCorrectnessUnderLoad() throws Exception {
+        String queueKey = "it-concurrency-stream-" + System.nanoTime();
+        String group = "it-concurrency-group-" + System.nanoTime();
+        int messageCount = 10;
+        int concurrentExecutions = 4;
+
+        OperationContext ctx = listenContext("Stream", queueKey, group, "OnCompletion", 60_000L, 5L, 500L,
+                concurrentExecutions);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        ListenerExecutionResult success = mock(ListenerExecutionResult.class);
+        when(success.isSuccess()).thenReturn(true);
+        when(listener.submit(any(Payload.class), any(SubmitOptions.class))).thenAnswer(invocation -> {
+            Payload payload = invocation.getArgument(0);
+            Thread.sleep(200L);
+            received.add(readPayload(payload));
+            return CompletableFuture.completedFuture(success);
+        });
+
+        op.start(listener, new RedisListenManager());
+        try (Jedis direct = directClient()) {
+            for (int i = 0; i < messageCount; i++) {
+                direct.xadd(queueKey, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", "m" + i));
+            }
+
+            long deadline = System.currentTimeMillis() + 30_000L;
+            while (received.size() < messageCount && System.currentTimeMillis() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(100);
+            }
+            assertEquals("Expected every message delivered exactly once, no duplicates", messageCount,
+                    received.size());
+            assertEquals("Expected every delivered value to be distinct", messageCount,
+                    new java.util.HashSet<>(received).size());
+
+            long ackDeadline = System.currentTimeMillis() + 10_000L;
+            long pendingTotal = direct.xpending(queueKey, group).getTotal();
+            while (pendingTotal > 0 && System.currentTimeMillis() < ackDeadline) {
+                TimeUnit.MILLISECONDS.sleep(100);
+                pendingTotal = direct.xpending(queueKey, group).getTotal();
+            }
+            assertEquals("Expected every message fully acknowledged despite concurrent execution",
+                    0L, direct.xpending(queueKey, group).getTotal());
+        } finally {
+            op.stop();
+        }
+    }
+
+    @Test
+    public void stopDuringConcurrentExecutionsDrainsInFlightWorkersBeforeClosingConnections() throws Exception {
+        String queueKey = "it-concurrency-drain-" + System.nanoTime();
+        String group = "it-concurrency-drain-group-" + System.nanoTime();
+        int concurrentExecutions = 2;
+
+        OperationContext ctx = listenContext("Stream", queueKey, group, "OnCompletion", 60_000L, 5L, 500L,
+                concurrentExecutions);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        ListenerExecutionResult success = mock(ListenerExecutionResult.class);
+        when(success.isSuccess()).thenReturn(true);
+        when(listener.submit(any(Payload.class), any(SubmitOptions.class))).thenAnswer(invocation -> {
+            Thread.sleep(2000L);
+            return CompletableFuture.completedFuture(success);
+        });
+
+        op.start(listener, new RedisListenManager());
+        try (Jedis direct = directClient()) {
+            direct.xadd(queueKey, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", "slow"));
+            // Give the poll thread time to read the message and dispatch it to a worker, which is
+            // now ~2s into its submit() call, before stop() races it.
+            Thread.sleep(700L);
+        }
+
+        long stopStartedAt = System.currentTimeMillis();
+        op.stop();
+        long stopElapsedMs = System.currentTimeMillis() - stopStartedAt;
+
+        assertTrue("Expected stop() to wait for the in-flight ~2s worker execution to finish before "
+                + "returning -- elapsed=" + stopElapsedMs + "ms", stopElapsedMs >= 1000L);
+
+        try (Jedis direct = directClient()) {
+            long ackDeadline = System.currentTimeMillis() + 5_000L;
+            long pendingTotal = direct.xpending(queueKey, group).getTotal();
+            while (pendingTotal > 0 && System.currentTimeMillis() < ackDeadline) {
+                TimeUnit.MILLISECONDS.sleep(100);
+                pendingTotal = direct.xpending(queueKey, group).getTotal();
+            }
+            assertEquals("Expected the in-flight message to be acknowledged since its worker was "
+                    + "allowed to finish (and ack) before stop() closed the ack connection", 0L,
+                    direct.xpending(queueKey, group).getTotal());
         }
     }
 }
