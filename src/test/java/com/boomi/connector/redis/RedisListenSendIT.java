@@ -520,7 +520,11 @@ public class RedisListenSendIT {
         ListenerExecutionResult success = mock(ListenerExecutionResult.class);
         when(success.isSuccess()).thenReturn(true);
         when(listener.submit(any(Payload.class), any(SubmitOptions.class))).thenAnswer(invocation -> {
-            Thread.sleep(2000L);
+            // 4s (not 2s) so the margin above the >= 1000ms assertion below stays wide even when
+            // the 700ms pre-stop() sleep overshoots badly on a loaded box: at 2s, a sleep that
+            // overshot to ~1200ms left under 1000ms of remaining worker time and the assertion
+            // could fail against a perfectly correct implementation.
+            Thread.sleep(4000L);
             return CompletableFuture.completedFuture(success);
         });
 
@@ -530,7 +534,7 @@ public class RedisListenSendIT {
             try (Jedis direct = directClient()) {
                 direct.xadd(queueKey, StreamEntryID.NEW_ENTRY, Collections.singletonMap("value", "slow"));
                 // Give the poll thread time to read the message and dispatch it to a worker, which
-                // is now ~2s into its submit() call, before stop() races it.
+                // is now ~3.3s away from finishing its 4s submit() call, before stop() races it.
                 Thread.sleep(700L);
             }
         } finally {
@@ -539,7 +543,7 @@ public class RedisListenSendIT {
             stopElapsedMs = System.currentTimeMillis() - stopStartedAt;
         }
 
-        assertTrue("Expected stop() to wait for the in-flight ~2s worker execution to finish before "
+        assertTrue("Expected stop() to wait for the in-flight ~4s worker execution to finish before "
                 + "returning -- elapsed=" + stopElapsedMs + "ms", stopElapsedMs >= 1000L);
 
         try (Jedis direct = directClient()) {
