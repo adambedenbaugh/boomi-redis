@@ -75,6 +75,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     private final long idleReclaimTimeoutMs;
     private final long maxDeliveryAttempts;
     private final String deadLetterKey;
+    private final int concurrentExecutions;
 
     private final AtomicBoolean stopping = new AtomicBoolean(false);
 
@@ -107,6 +108,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         if (queueKey == null || queueKey.isEmpty()) {
             throw new ConnectorException("The Listen operation requires a non-empty \"Queue Key\".");
         }
+
+        long configuredConcurrency = longPropertyOrDefault(context.getOperationProperties(),
+                "concurrent_executions", 1L);
+        this.concurrentExecutions = (int) Math.max(1L, configuredConcurrency);
 
         if (STREAM.equals(queueType)) {
             this.consumerGroupName = context.getOperationProperties().getProperty("consumer_group_name", "");
@@ -143,6 +148,10 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
 
     long computeJoinTimeoutMsForTest() {
         return computeJoinTimeoutMs();
+    }
+
+    int getConcurrentExecutionsForTest() {
+        return concurrentExecutions;
     }
 
     /**

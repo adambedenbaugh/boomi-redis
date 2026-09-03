@@ -148,12 +148,22 @@ Default is empty.
 
 **Poll Block (ms)** — Blocking timeout per poll iteration (BLPOP timeout / XREADGROUP BLOCK), in milliseconds. Default is `5000` (5 seconds).
 
+**Concurrent Executions** — Maximum number of Boomi process executions this
+listener may have in flight at once. Redis reads still happen one at a time on
+a single poll loop; this setting only bounds how many already-read messages
+may be submitted to Boomi concurrently. Default is `1` (fully sequential,
+matching prior behavior).
+
 > **Attention:** On a pooled connection, a Listen operation borrows one connection
-> from the shared pool and holds it for essentially the entire time it is running
-> — a blocking poll borrows-and-holds it for the block duration, iteration after
-> iteration. Size the connection's **Maximum Connections** to accommodate the
-> number of concurrent Listen operations plus normal GET/UPSERT/DELETE/Send
-> traffic sharing that same connection.
+> from the shared pool for polling and holds it for essentially the entire time it
+> is running — a blocking poll borrows-and-holds it for the block duration,
+> iteration after iteration. A Stream-mode Listen operation borrows a **second**
+> pooled connection dedicated to acknowledgements, held for its entire run as
+> well — List mode has no ack step and borrows only the one polling connection,
+> regardless of Concurrent Executions. Size the connection's **Maximum
+> Connections** to accommodate (1 or 2, per Listen operation, depending on Queue
+> Type) times the number of concurrent Listen operations, plus normal
+> GET/UPSERT/DELETE/Send traffic sharing that same connection.
 
 ## Send
 

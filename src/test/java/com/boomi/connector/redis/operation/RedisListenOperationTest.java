@@ -567,6 +567,42 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void concurrentExecutionsDefaultsToOne() {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        assertEquals(1, op.getConcurrentExecutionsForTest());
+    }
+
+    @Test
+    public void concurrentExecutionsHonorsConfiguredValue() {
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(4L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        assertEquals(4, op.getConcurrentExecutionsForTest());
+    }
+
+    @Test
+    public void concurrentExecutionsFlooredAtOneWhenConfiguredNonPositive() {
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(0L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        assertEquals(1, op.getConcurrentExecutionsForTest());
+    }
+
+    @Test
     public void joinTimeoutIsCappedAt30SecondsEvenWithVeryLargeIdleReclaimTimeout() {
         // Regression test for the Important review finding: computeJoinTimeoutMs() used to scale
         // unboundedly with ackWaitTimeoutMs (sourced from idle_reclaim_timeout_ms in Stream +

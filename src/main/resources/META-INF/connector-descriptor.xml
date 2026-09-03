@@ -274,6 +274,13 @@
 	        <helpText>Blocking timeout per poll iteration (BLPOP timeout / XREADGROUP BLOCK).</helpText>
 	        <defaultValue>5000</defaultValue>
 	    </field>
+	    <field id="concurrent_executions" label="Concurrent Executions" type="integer">
+	        <helpText>Maximum number of Boomi process executions this listener may have in flight at
+	            once. Redis reads still happen one at a time on a single poll loop; this setting only
+	            bounds how many already-read messages may be submitted to Boomi concurrently. Defaults
+	            to 1, which reproduces the previous strictly sequential behavior.</helpText>
+	        <defaultValue>1</defaultValue>
+	    </field>
 	</operation>
 
 	<operation types="EXECUTE" customTypeId="send" customTypeLabel="SEND" supportsBrowse="true">
