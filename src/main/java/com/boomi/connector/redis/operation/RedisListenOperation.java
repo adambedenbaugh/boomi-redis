@@ -760,32 +760,45 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                 break;
             }
 
-            RedisStreamMessage claimed = claimQuietly(p.getId());
-            if (claimed == null) {
-                continue;
+            if (!permits.tryAcquire()) {
+                // Gate BEFORE the claim, not after. XCLAIM increments Redis's own delivery
+                // counter as a side effect of claiming, so claiming an entry we have no slot to
+                // execute would burn one of its max_delivery_attempts without Boomi ever seeing
+                // the message -- under sustained saturation (the common case at the connector's
+                // own default concurrent_executions=1, where the sole permit is held by whatever
+                // worker triggered this sweep in the first place) that silently dead-letters a
+                // message that was never actually retried. Leaving the entry untouched costs
+                // nothing: it stays idle-pending in Redis at its true, unchanged delivery count
+                // and is picked up by a future sweep once a slot opens up. break (not continue)
+                // is correct here: no permit means no capacity for the rest of THIS sweep either,
+                // so the remaining pending entries are left untouched too rather than each paying
+                // for a tryAcquire() that cannot succeed until a worker finishes.
+                logger.fine("Reclaim sweep for " + queueKey + " is pausing: no execution slot is "
+                        + "free. Remaining pending entries are left untouched for a future sweep.");
+                break;
             }
-
-            // XCLAIM increments Redis's delivery counter as a side effect of claiming, so the
-            // count that governs THIS delivery is p.getDeliveryCount() + 1 (the pre-claim value
-            // read from XPENDING above), not the pre-claim value itself -- comparing against the
-            // stale pre-claim count let one extra delivery through past max_delivery_attempts.
-            long deliveryCountAfterClaim = p.getDeliveryCount() + 1;
-            if (deliveryCountAfterClaim > maxDeliveryAttempts) {
-                deadLetterQuietly(claimed);
-                logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
-                        + " after " + deliveryCountAfterClaim + " delivery attempts.");
-            } else if (permits.tryAcquire()) {
-                try {
-                    submitStreamMessage(claimed);
-                } finally {
-                    permits.release();
+            try {
+                RedisStreamMessage claimed = claimQuietly(p.getId());
+                if (claimed == null) {
+                    continue;
                 }
+
+                // XCLAIM increments Redis's delivery counter as a side effect of claiming, so the
+                // count that governs THIS delivery is p.getDeliveryCount() + 1 (the pre-claim
+                // value read from XPENDING above), not the pre-claim value itself -- comparing
+                // against the stale pre-claim count let one extra delivery through past
+                // max_delivery_attempts.
+                long deliveryCountAfterClaim = p.getDeliveryCount() + 1;
+                if (deliveryCountAfterClaim > maxDeliveryAttempts) {
+                    deadLetterQuietly(claimed);
+                    logger.warning("Dead-lettered stream message " + claimed.getId() + " from " + queueKey
+                            + " after " + deliveryCountAfterClaim + " delivery attempts.");
+                } else {
+                    submitStreamMessage(claimed);
+                }
+            } finally {
+                permits.release();
             }
-            // else: no execution slot currently free -- leave this entry pending; it will be
-            // picked up again on a future sweep once a slot opens up. Using tryAcquire() (not the
-            // blocking acquire()) here is deliberate: this runs on the poll thread itself, and a
-            // blocking wait here would extend how long the poll thread can be parked well beyond
-            // what stop()'s join-timeout budget accounts for.
         }
     }
 

@@ -1260,7 +1260,10 @@ public class RedisListenOperationTest {
         // poll thread simultaneously ran message B's redelivery: two concurrent Boomi process
         // executions on a listener configured for exactly one. The redelivery path must take a
         // permit too (non-blocking, so it never parks the poll thread past stop()'s join budget)
-        // and leave the entry pending when no slot is free.
+        // and leave the entry pending when no slot is free. The gate is taken BEFORE the XCLAIM
+        // (not after): claiming first and only then checking for a permit would let XCLAIM's own
+        // delivery-counter side effect burn a real attempt on a message Boomi never actually saw --
+        // so while the sole permit is held, the sweep must not touch Redis for this entry at all.
         RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
         assertEquals("this test's premise is the DEFAULT sequential configuration", 1,
                 op.getConcurrentExecutionsForTest());
@@ -1297,18 +1300,18 @@ public class RedisListenOperationTest {
         })) {
             op.start(listener, new RedisListenManager());
             // Long enough for the poll thread to read 20-1, dispatch it (consuming the sole
-            // permit), and run a full reclaim sweep that reaches its redelivery decision.
+            // permit), and run several reclaim sweeps that each hit the gate.
             Thread.sleep(1000L);
 
             RedisConnection ackConnection = mocked.constructed().get(1);
-            // Proves the sweep genuinely ran and reached its redelivery decision point -- without
-            // this, the assertion below would also pass if no sweep had happened at all.
-            verify(ackConnection, atLeastOnce()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("20-9"));
+            // While the sole permit is held by the in-flight worker, the sweep must never even
+            // attempt the XCLAIM -- gating happens before the claim, not after.
+            verify(ackConnection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("20-9"));
             assertEquals("while the sole execution permit is held by an in-flight worker, the "
                     + "reclaim sweep must NOT run a redelivery -- only the worker's own submission "
                     + "may be in flight", 1, submitCount.get());
 
-            // Release the worker: it returns its permit, so a later sweep may now redeliver.
+            // Release the worker: it returns its permit, so a later sweep may now claim and redeliver.
             workerGate.countDown();
             long deadline = System.currentTimeMillis() + 20_000L;
             while (submitCount.get() < 2 && System.currentTimeMillis() < deadline) {
@@ -1317,6 +1320,72 @@ public class RedisListenOperationTest {
             assertTrue("once the worker releases the permit, a subsequent sweep must redeliver the "
                     + "still-pending entry -- observed submissions: " + submitCount.get(),
                     submitCount.get() >= 2);
+            verify(ackConnection, atLeastOnce()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("20-9"));
+
+            op.stop();
+        }
+    }
+
+    @Test(timeout = 40000)
+    public void reclaimSweepNeverClaimsWhenSaturatedAcrossMultipleSweepCycles() throws Exception {
+        // Companion to the test above: proves the gate-before-claim ordering holds up over
+        // several sweep cycles, not just a single check -- i.e. a saturated listener leaves the
+        // pending entry's Redis delivery count practically untouched (no XCLAIM at all) for as
+        // long as no execution slot is free, rather than merely avoiding it once.
+        // Uses the 1-arg streamContext(), which stubs idle_reclaim_timeout_ms=50ms (plenty short
+        // enough for several sweep cycles to elapse within the 1s hold window below) along with
+        // max_delivery_attempts=3 and dead_letter_key="" -- the 2-arg overload leaves those two
+        // unstubbed, which would make every claim dead-letter instead of redeliver.
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        assertEquals("this test's premise is the DEFAULT sequential configuration", 1,
+                op.getConcurrentExecutionsForTest());
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage inFlight =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("30-1", "busy");
+        com.boomi.connector.redis.connection.RedisStreamPendingMessage pending =
+                new com.boomi.connector.redis.connection.RedisStreamPendingMessage("30-9", 1L);
+        com.boomi.connector.redis.connection.RedisStreamMessage reclaimed =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("30-9", "stale");
+
+        java.util.concurrent.CountDownLatch workerGate = new java.util.concurrent.CountDownLatch(1);
+        AtomicInteger submitCount = new AtomicInteger(0);
+        doAnswer(invocation -> {
+            if (submitCount.incrementAndGet() == 1) {
+                // Hold the sole permit across several 75ms sweep intervals.
+                workerGate.await(20, TimeUnit.SECONDS);
+            }
+            return null;
+        }).when(listener).submit(any(com.boomi.connector.api.Payload.class));
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class, (mock, context) -> {
+            when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(inFlight))
+                    .thenReturn(java.util.Collections.emptyList());
+            when(mock.xpendingIdle(eq("s"), eq("mygroup"), anyLong(), anyInt()))
+                    .thenReturn(java.util.Collections.singletonList(pending));
+            when(mock.xclaim(eq("s"), eq("mygroup"), anyString(), eq("30-9"))).thenReturn(reclaimed);
+        })) {
+            op.start(listener, new RedisListenManager());
+            // idle_reclaim_timeout_ms=50ms (via streamContext()) => several sweep cycles elapse
+            // while the worker is still latched, well beyond the time a single sweep would take.
+            Thread.sleep(1000L);
+
+            RedisConnection ackConnection = mocked.constructed().get(1);
+            verify(ackConnection, never()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("30-9"));
+            assertEquals("no redelivery may occur while the sole permit is saturated, across "
+                    + "multiple sweep cycles", 1, submitCount.get());
+
+            // Release the worker: once a slot frees up, the next sweep must claim and redeliver.
+            workerGate.countDown();
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (submitCount.get() < 2 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50L);
+            }
+            assertTrue("once a slot frees up, the sweep must claim and redeliver the still-pending "
+                    + "entry -- observed submissions: " + submitCount.get(), submitCount.get() >= 2);
+            verify(ackConnection, atLeastOnce()).xclaim(eq("s"), eq("mygroup"), anyString(), eq("30-9"));
 
             op.stop();
         }
