@@ -227,6 +227,38 @@ public class RedisListenOperationTest {
         }
     }
 
+    @Test(timeout = 20000)
+    public void anErrorFromBlpopDoesNotLeakTheExecutionPermit() throws Exception {
+        // concurrent_executions=1 (explicit) so a single leaked permit wedges the listener: the next
+        // acquirePermit() would block forever and no further blpop() could ever run.
+        PropertyMap opProps = mock(PropertyMap.class);
+        when(opProps.getProperty("queue_type", "List")).thenReturn("List");
+        when(opProps.getProperty("queue_key", "")).thenReturn("q");
+        when(opProps.getBooleanProperty("singleton_mode", Boolean.FALSE)).thenReturn(false);
+        when(opProps.getLongProperty("poll_block_ms", 5000L)).thenReturn(1000L);
+        when(opProps.getLongProperty(eq("concurrent_executions"), any())).thenReturn(1L);
+        OperationContext ctx = mock(OperationContext.class);
+        when(ctx.getOperationProperties()).thenReturn(opProps);
+
+        RedisListenOperation op = new RedisListenOperation(ctx);
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new StackOverflowError())
+                        .thenReturn(null))) {
+            op.start(listener, new RedisListenManager());
+            // Wait out the real 5s backoff() so the second poll runs; it can only run if the Error
+            // path released the single execution permit.
+            Thread.sleep(5500);
+            op.stop();
+
+            verify(mocked.constructed().get(0), atLeast(2)).blpop(eq("q"), anyInt());
+            verify(listener, atLeastOnce()).updateStatus(ListenerStatus.ONLINE);
+        }
+    }
+
     @Test
     public void shouldLogFailureAlwaysLogsTheFirstOccurrence() {
         assertTrue(RedisListenOperation.shouldLogFailure(1, 1_000L, 0L));

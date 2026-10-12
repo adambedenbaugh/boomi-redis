@@ -589,7 +589,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         String value;
         try {
             value = connection.blpop(queueKey, pollBlockSeconds);
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
+            // Throwable, not RuntimeException: runPollLoop survives Errors too, so a leaked permit
+            // here would wedge the listener on the next acquirePermit().
             permits.release();
             throw e;
         }
@@ -664,7 +666,9 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
         try {
             messages = connection.xreadGroup(
                     queueKey, consumerGroupName, consumerName, 1, pollBlockSeconds * 1000);
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
+            // Throwable, not RuntimeException: runPollLoop survives Errors too, so a leaked permit
+            // here would wedge the listener on the next acquirePermit().
             permits.release();
             throw e;
         }
