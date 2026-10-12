@@ -925,7 +925,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
             lastLoggedAckFailureAtMillis = now;
         }
         updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE,
-                "Ack connection broke on " + queueKey + ": " + e.getMessage());
+                "Ack connection broke on " + queueKey + ": " + describeFailure(e));
     }
 
     /**

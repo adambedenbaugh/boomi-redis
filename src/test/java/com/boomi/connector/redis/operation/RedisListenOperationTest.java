@@ -1349,6 +1349,35 @@ public class RedisListenOperationTest {
         }
     }
 
+    @Test(timeout = 20000)
+    public void ackConnectionBreakWithNoMessageReportsOfflineWithTheClassName() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(streamContext("OnSubmission"));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        com.boomi.connector.redis.connection.RedisStreamMessage m1 =
+                new com.boomi.connector.redis.connection.RedisStreamMessage("1-1", "v1");
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> {
+                    if (context.getCount() == 2) {
+                        // The ack connection: xack throws a message-less JedisConnectionException.
+                        doThrow(new JedisConnectionException((String) null))
+                                .when(mock).xack(eq("s"), eq("mygroup"), eq("1-1"));
+                    }
+                    when(mock.xreadGroup(eq("s"), eq("mygroup"), anyString(), anyInt(), anyInt()))
+                            .thenReturn(java.util.Collections.singletonList(m1))
+                            .thenReturn(java.util.Collections.emptyList());
+                })) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(1500L);
+            op.stop();
+
+            verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE),
+                    eq("Ack connection broke on s: JedisConnectionException"));
+        }
+    }
+
     @Test(timeout = 40000)
     public void reclaimSweepRedeliveryIsBoundedByTheSameExecutionPermitsAsDispatchedWorkers()
             throws Exception {
