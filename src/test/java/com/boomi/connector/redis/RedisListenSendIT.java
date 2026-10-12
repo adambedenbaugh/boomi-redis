@@ -5,6 +5,7 @@ import com.boomi.connector.api.OperationType;
 import com.boomi.connector.api.Payload;
 import com.boomi.connector.api.listen.Listener;
 import com.boomi.connector.api.listen.ListenerExecutionResult;
+import com.boomi.connector.api.listen.ListenerStatus;
 import com.boomi.connector.api.listen.SubmitOptions;
 import com.boomi.connector.redis.operation.RedisListenOperation;
 import com.boomi.connector.redis.pool.RedisClientPoolManager;
@@ -105,14 +106,21 @@ public class RedisListenSendIT {
     private OperationContext listenContext(String queueType, String queueKey, String consumerGroupName,
             String ackMode, long idleReclaimTimeoutMs, long maxDeliveryAttempts, long pollBlockMs,
             long concurrentExecutions) {
+        return listenContext(queueType, queueKey, consumerGroupName, ackMode, idleReclaimTimeoutMs,
+                maxDeliveryAttempts, pollBlockMs, concurrentExecutions, 5L, 5L);
+    }
+
+    private OperationContext listenContext(String queueType, String queueKey, String consumerGroupName,
+            String ackMode, long idleReclaimTimeoutMs, long maxDeliveryAttempts, long pollBlockMs,
+            long concurrentExecutions, long connectionTimeoutSeconds, long socketTimeoutSeconds) {
         Map<String, Object> connProps = new HashMap<>();
         connProps.put("hosts", hostPort);
         connProps.put("authenticationType", "None");
         connProps.put("clusteringPolicy", "NonClustered");
         connProps.put("useSSL", false);
         connProps.put("poolEnabled", false);
-        connProps.put("connectionTimeout", 5L);
-        connProps.put("socketTimeout", 5L);
+        connProps.put("connectionTimeout", connectionTimeoutSeconds);
+        connProps.put("socketTimeout", socketTimeoutSeconds);
 
         Map<String, Object> opProps = new HashMap<>();
         opProps.put("queue_type", queueType);
@@ -557,5 +565,73 @@ public class RedisListenSendIT {
                     + "allowed to finish (and ack) before stop() closed the ack connection", 0L,
                     direct.xpending(queueKey, group).getTotal());
         }
+    }
+
+    /**
+     * Proves the runtime is told the listener is unhealthy when Redis genuinely goes away, and
+     * told it recovered when Redis returns -- using a real fault, not a mocked exception.
+     * {@code docker pause} freezes the Redis process while its mapped port stays the same (a
+     * stop/start would remap the port and strand the shared {@code hostPort}); the poll
+     * connection's bounded blocking read then times out, the listener reports OFFLINE with a
+     * non-blank message, and after unpause the reconnect path reports ONLINE and delivers a
+     * message pushed while the listener was recovering.
+     */
+    @Test(timeout = 90_000L)
+    public void listenerReportsOfflineWhenRedisIsUnreachableThenOnlineAfterRecovery() throws Exception {
+        String queueKey = "it-offline-" + System.nanoTime();
+        // 1s socket/connection timeouts: a BLPOP's bounded read timeout is socketTimeout x 12 plus
+        // connectionTimeout (see BaseRedisConnection.buildClientConfig), i.e. ~65s at the 5s
+        // defaults -- far too slow to observe a frozen Redis -- but ~13s here.
+        OperationContext ctx = listenContext("List", queueKey, null, null, 60_000L, 5L, 1000L, 1L, 1L, 1L);
+        RedisListenOperation op = new RedisListenOperation(ctx);
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Payload payload = invocation.getArgument(0);
+            received.add(readPayload(payload));
+            return null;
+        }).when(listener).submit(any(Payload.class));
+
+        String containerId = REDIS.getContainerId();
+        boolean paused = false;
+        op.start(listener, new RedisListenManager());
+        try {
+            // Let the poll loop settle into its blocking BLPOP before the fault is injected.
+            TimeUnit.MILLISECONDS.sleep(500);
+
+            REDIS.getDockerClient().pauseContainerCmd(containerId).exec();
+            paused = true;
+
+            org.mockito.Mockito.verify(listener, org.mockito.Mockito.timeout(40_000L).atLeastOnce())
+                    .updateStatus(org.mockito.ArgumentMatchers.eq(ListenerStatus.OFFLINE),
+                            org.mockito.ArgumentMatchers.argThat(
+                                    (String message) -> message != null && !message.trim().isEmpty()));
+
+            REDIS.getDockerClient().unpauseContainerCmd(containerId).exec();
+            paused = false;
+
+            org.mockito.Mockito.verify(listener, org.mockito.Mockito.timeout(40_000L).atLeastOnce())
+                    .updateStatus(ListenerStatus.ONLINE);
+
+            try (Jedis direct = directClient()) {
+                direct.rpush(queueKey, "after-recovery");
+            }
+            long deadline = System.currentTimeMillis() + 15_000L;
+            while (received.isEmpty() && System.currentTimeMillis() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(100);
+            }
+        } finally {
+            if (paused) {
+                REDIS.getDockerClient().unpauseContainerCmd(containerId).exec();
+            }
+            op.stop();
+        }
+
+        assertFalse("Expected the recovered listener to deliver the message pushed after Redis returned",
+                received.isEmpty());
+        assertTrue("Expected the delivered payload to contain the pushed value; got: " + received.get(0),
+                received.get(0).contains("after-recovery"));
     }
 }
