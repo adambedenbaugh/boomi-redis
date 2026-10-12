@@ -367,7 +367,8 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     wasOffline = false;
                     consecutiveFailures = 0;
                 }
-            } catch (Exception e) {
+            // Throwable, not Exception: an Error would otherwise silently kill this daemon thread and leave the listener showing ONLINE while it never polls again.
+            } catch (Throwable e) {
                 consecutiveFailures++;
                 long now = System.currentTimeMillis();
                 if (shouldLogFailure(consecutiveFailures, now, lastLoggedFailureAtMillis)) {
@@ -379,7 +380,7 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
                     logger.log(Level.SEVERE, "Error while polling Redis queue " + queueKey + throttleNote, e);
                     lastLoggedFailureAtMillis = now;
                 }
-                updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, e.getMessage());
+                updateStatusQuietly(com.boomi.connector.api.listen.ListenerStatus.OFFLINE, describeFailure(e));
                 wasOffline = true;
                 // Reconnect on a fresh connection-level break (still-live-but-broken Jedis, e.g.
                 // broken pipe) AND whenever the connection is currently null (a previous reconnect

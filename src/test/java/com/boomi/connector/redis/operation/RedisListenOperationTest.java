@@ -167,6 +167,67 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void anErrorWithNoMessageReportsOfflineWithTheClassName() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new NoClassDefFoundError()))) {
+            op.start(listener, new RedisListenManager());
+            // First poll fails immediately; stop() interrupts the 5s backoff that follows.
+            Thread.sleep(300);
+            op.stop();
+
+            verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE),
+                    contains("NoClassDefFoundError"));
+        }
+    }
+
+    @Test
+    public void anExceptionWithNoMessageReportsOfflineWithTheClassNameNotNull() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new IllegalStateException()))) {
+            op.start(listener, new RedisListenManager());
+            Thread.sleep(300);
+            op.stop();
+
+            verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE),
+                    contains("IllegalStateException"));
+            // The old code took the message-less overload when getMessage() was null.
+            verify(listener, never()).updateStatus(ListenerStatus.OFFLINE);
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void pollLoopSurvivesAnErrorAndRecoversToOnline() throws Exception {
+        RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
+        Listener listener = mock(Listener.class);
+        when(listener.isStopping()).thenReturn(false);
+
+        try (MockedConstruction<RedisConnection> mocked = mockConstruction(RedisConnection.class,
+                (mock, context) -> when(mock.blpop(eq("q"), anyInt()))
+                        .thenThrow(new StackOverflowError())
+                        .thenReturn(null))) {
+            op.start(listener, new RedisListenManager());
+            // Wait out the real 5s backoff() (see connectionFailureReportsOfflineThenOnlineOnRecovery)
+            // so the second, successful poll runs before stop().
+            Thread.sleep(5500);
+            op.stop();
+
+            verify(listener, atLeastOnce()).updateStatus(eq(ListenerStatus.OFFLINE),
+                    contains("StackOverflowError"));
+            verify(listener, atLeastOnce()).updateStatus(ListenerStatus.ONLINE);
+        }
+    }
+
+    @Test
     public void shouldLogFailureAlwaysLogsTheFirstOccurrence() {
         assertTrue(RedisListenOperation.shouldLogFailure(1, 1_000L, 0L));
     }
