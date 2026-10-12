@@ -30,6 +30,9 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   call — but `XCLAIM` increments Redis's delivery counter as a side effect of claiming, so that
   pre-claim count was always one lower than the count that actually governed the delivery about
   to happen.
+- Listen: the poll loop now reports `OFFLINE` to the runtime for *any* failure, including `Error`s
+  (previously an `Error` silently killed the poll thread while the listener still showed ONLINE).
+  OFFLINE messages fall back to the exception class name when the exception has no message.
 
 ## [1.2.0] - 2026-08-14
 
