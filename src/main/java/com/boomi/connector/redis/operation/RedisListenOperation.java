@@ -404,6 +404,24 @@ public class RedisListenOperation implements SingletonListenOperation<RedisListe
     }
 
     /**
+     * Builds the text sent to the runtime with an OFFLINE status. Many failures carry no message
+     * ({@code new NoClassDefFoundError()}, a bare {@code RuntimeException}), and the Boomi UI would
+     * otherwise show nothing -- or the literal word "null" -- so fall back to the class name.
+     * Anonymous classes have an empty simple name, so they fall back to the full class name.
+     */
+    static String describeFailure(Throwable t) {
+        if (t == null) {
+            return "Unknown error";
+        }
+        String message = t.getMessage();
+        if (message != null && !message.trim().isEmpty()) {
+            return message;
+        }
+        String simpleName = t.getClass().getSimpleName();
+        return simpleName.isEmpty() ? t.getClass().getName() : simpleName;
+    }
+
+    /**
      * Replaces a broken {@link #pollConnection} after a {@link JedisConnectionException} (broken
      * pipe, read timeout, or Jedis's own "broken connection" fail-fast). Jedis never repairs a
      * broken {@code Connection} internally -- without this, the poll loop would retry the exact

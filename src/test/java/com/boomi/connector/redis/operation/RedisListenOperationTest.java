@@ -186,6 +186,43 @@ public class RedisListenOperationTest {
     }
 
     @Test
+    public void describeFailureReturnsTheMessageWhenPresent() {
+        assertEquals("connection reset",
+                RedisListenOperation.describeFailure(new RuntimeException("connection reset")));
+    }
+
+    @Test
+    public void describeFailureFallsBackToTheClassNameWhenTheMessageIsNull() {
+        assertEquals("NoClassDefFoundError",
+                RedisListenOperation.describeFailure(new NoClassDefFoundError()));
+    }
+
+    @Test
+    public void describeFailureFallsBackToTheClassNameWhenTheMessageIsEmpty() {
+        assertEquals("IllegalStateException",
+                RedisListenOperation.describeFailure(new IllegalStateException("")));
+    }
+
+    @Test
+    public void describeFailureFallsBackToTheClassNameWhenTheMessageIsOnlyWhitespace() {
+        assertEquals("RuntimeException",
+                RedisListenOperation.describeFailure(new RuntimeException("  \t ")));
+    }
+
+    @Test
+    public void describeFailureUsesTheFullClassNameForAnAnonymousThrowable() {
+        Throwable anonymous = new RuntimeException() { };
+        String described = RedisListenOperation.describeFailure(anonymous);
+        assertFalse("must never be empty", described.isEmpty());
+        assertEquals(anonymous.getClass().getName(), described);
+    }
+
+    @Test
+    public void describeFailureNeverThrowsOnANullThrowable() {
+        assertEquals("Unknown error", RedisListenOperation.describeFailure(null));
+    }
+
+    @Test
     public void connectionExceptionClosesTheBrokenConnectionAndAttemptsToReconnect() throws Exception {
         RedisListenOperation op = new RedisListenOperation(contextWithQueueKey("q", false));
         Listener listener = mock(Listener.class);
